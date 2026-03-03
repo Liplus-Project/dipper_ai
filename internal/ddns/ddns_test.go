@@ -3,6 +3,7 @@ package ddns
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -51,9 +52,17 @@ func TestMyDNSIPv4_HTTPError(t *testing.T) {
 }
 
 func TestMyDNSIPv6_Success(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// UpdateMyDNSIPv6 forces tcp6, so the mock server must listen on IPv6 loopback.
+	ln, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skip("IPv6 loopback not available on this host, skipping IPv6 test")
+	}
+
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
+	srv.Listener = ln
+	srv.Start()
 	defer srv.Close()
 
 	entry := MyDNSEntry{ID: "testid", Pass: "testpass", Domain: "home.example.com"}
