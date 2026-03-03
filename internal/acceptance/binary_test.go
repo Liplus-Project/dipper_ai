@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 var binaryPath string
@@ -34,9 +35,11 @@ func TestMain(m *testing.M) {
 }
 
 // writeConf writes a minimal user.conf for a test and returns its path.
+// IPV4 and IPV6 are off by default to avoid requiring dig in CI.
+// Pass extra lines to override individual settings.
 func writeConf(t *testing.T, stateDir string, extra string) string {
 	t.Helper()
-	content := fmt.Sprintf("STATE_DIR=%s\nIPV4=on\nIPV6=off\nUPDATE_TIME=1\nDDNS_TIME=1\nIP_CACHE_TIME=0\nERR_CHK_TIME=0\n%s", stateDir, extra)
+	content := fmt.Sprintf("STATE_DIR=%s\nIPV4=off\nIPV6=off\nUPDATE_TIME=1\nDDNS_TIME=1\nIP_CACHE_TIME=0\nERR_CHK_TIME=0\n%s", stateDir, extra)
 	p := filepath.Join(t.TempDir(), "user.conf")
 	if err := os.WriteFile(p, []byte(content), 0644); err != nil {
 		t.Fatal(err)
@@ -77,10 +80,17 @@ func TestBinary_Update_ExitZero(t *testing.T) {
 
 func TestBinary_Check_OutputsIPLine(t *testing.T) {
 	stateDir := t.TempDir()
-	conf := writeConf(t, stateDir, "")
+	// IPV4=on with a positive cache time so check reads the cached IP
+	// without calling dig. IPV6 stays off.
+	conf := writeConf(t, stateDir, "IPV4=on\nIP_CACHE_TIME=60\n")
 
-	// Pre-seed an IP so check can output it without calling dig
+	// Pre-seed cached IP state.
 	if err := os.WriteFile(filepath.Join(stateDir, "ip_ipv4"), []byte("1.2.3.4\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-seed ip_cache gate as "just touched" so no dig call is made.
+	ts := fmt.Sprintf("%d\n", time.Now().Unix())
+	if err := os.WriteFile(filepath.Join(stateDir, "gate_ip_cache"), []byte(ts), 0644); err != nil {
 		t.Fatal(err)
 	}
 
