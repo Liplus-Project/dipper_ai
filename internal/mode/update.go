@@ -12,6 +12,14 @@ import (
 	"github.com/Liplus-Project/dipper_ai/internal/timegate"
 )
 
+// Package-level function variables — overridable in tests.
+var (
+	ipFetch          = ip.Fetch
+	mydnsUpdateIPv4  = ddns.UpdateMyDNSIPv4
+	mydnsUpdateIPv6  = ddns.UpdateMyDNSIPv6
+	cloudflareUpdate = ddns.UpdateCloudflare
+)
+
 // Update is the main DDNS update mode.
 // Equivalent to `dipper update`.
 func Update(cfg *config.Config) error {
@@ -29,7 +37,7 @@ func Update(cfg *config.Config) error {
 	// --- Fetch IPs ---
 	wantV4 := cfg.IPv4 && cfg.IPv4DDNS
 	wantV6 := cfg.IPv6 && cfg.IPv6DDNS
-	fetched, err := ip.Fetch(wantV4, wantV6)
+	fetched, err := ipFetch(wantV4, wantV6)
 	if err != nil {
 		_ = st.AppendError(fmt.Sprintf("ip_fetch_error: %v", err))
 		return err
@@ -78,7 +86,7 @@ func Update(cfg *config.Config) error {
 			Domain: entry.Domain,
 		}
 		if wantV4 && entry.IPv4 && fetched.IPv4 != "" {
-			r := ddns.UpdateMyDNSIPv4(dnsEntry, cfg.MyDNSIPv4URL)
+			r := mydnsUpdateIPv4(dnsEntry, cfg.MyDNSIPv4URL)
 			key := fmt.Sprintf("mydns_%d_ipv4", i)
 			if r.Err != nil {
 				_ = st.WriteDDNSResult(key, "fail:"+r.Err.Error())
@@ -89,7 +97,7 @@ func Update(cfg *config.Config) error {
 			}
 		}
 		if wantV6 && entry.IPv6 && fetched.IPv6 != "" {
-			r := ddns.UpdateMyDNSIPv6(dnsEntry, cfg.MyDNSIPv6URL)
+			r := mydnsUpdateIPv6(dnsEntry, cfg.MyDNSIPv6URL)
 			key := fmt.Sprintf("mydns_%d_ipv6", i)
 			if r.Err != nil {
 				_ = st.WriteDDNSResult(key, "fail:"+r.Err.Error())
@@ -112,7 +120,7 @@ func Update(cfg *config.Config) error {
 			Domain: cf.Domain,
 		}
 		if wantV4 && cf.IPv4 && fetched.IPv4 != "" {
-			r := ddns.UpdateCloudflare(cfEntry, fetched.IPv4, "A", cfg.CloudflareURL)
+			r := cloudflareUpdate(cfEntry, fetched.IPv4, "A", cfg.CloudflareURL)
 			key := fmt.Sprintf("cf_%d_A", i)
 			if r.Err != nil {
 				_ = st.WriteDDNSResult(key, "fail:"+r.Err.Error())
@@ -123,7 +131,7 @@ func Update(cfg *config.Config) error {
 			}
 		}
 		if wantV6 && cf.IPv6 && fetched.IPv6 != "" {
-			r := ddns.UpdateCloudflare(cfEntry, fetched.IPv6, "AAAA", cfg.CloudflareURL)
+			r := cloudflareUpdate(cfEntry, fetched.IPv6, "AAAA", cfg.CloudflareURL)
 			key := fmt.Sprintf("cf_%d_AAAA", i)
 			if r.Err != nil {
 				_ = st.WriteDDNSResult(key, "fail:"+r.Err.Error())

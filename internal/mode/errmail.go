@@ -11,6 +11,9 @@ import (
 	"github.com/Liplus-Project/dipper_ai/internal/timegate"
 )
 
+// sendMailFn is the mail-sending function; overridable in tests.
+var sendMailFn = sendMail
+
 // ErrMail aggregates errors and sends a notification if the threshold is met.
 // Equivalent to `dipper err_mail`.
 func ErrMail(cfg *config.Config) error {
@@ -43,7 +46,7 @@ func ErrMail(cfg *config.Config) error {
 	body := fmt.Sprintf("dipper_ai error report (%d errors):\n\n%s\n",
 		len(errors), strings.Join(errors, "\n"))
 
-	if err := sendMail(cfg.EmailAddr, "dipper_ai: error notification", body); err != nil {
+	if err := sendMailFn(cfg.EmailAddr, "dipper_ai: error notification", body); err != nil {
 		_ = st.AppendError(fmt.Sprintf("sendmail_failed: %v", err))
 		return fmt.Errorf("sendmail: %w", err)
 	}
