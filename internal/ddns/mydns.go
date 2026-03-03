@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -65,12 +66,18 @@ func doMyDNSRequest(entry MyDNSEntry, updateURL, network string) ProviderResult 
 		Timeout:   15 * time.Second,
 	}
 
-	req, err := http.NewRequest(http.MethodGet, updateURL, nil)
+	// Embed credentials in the URL: https://ID:PASS@ipv4.mydns.jp/login.html
+	// This matches the original dipper format and is unambiguous about intent.
+	u, err := urlWithCreds(updateURL, entry.ID, entry.Pass)
+	if err != nil {
+		pr.Err = fmt.Errorf("ipv%s url build: %w", proto, err)
+		return pr
+	}
+	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
 		pr.Err = fmt.Errorf("ipv%s request build: %w", proto, err)
 		return pr
 	}
-	req.SetBasicAuth(entry.ID, entry.Pass)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -84,4 +91,15 @@ func doMyDNSRequest(entry MyDNSEntry, updateURL, network string) ProviderResult 
 		pr.Err = fmt.Errorf("ipv%s status %d: %s", proto, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return pr
+}
+
+// urlWithCreds embeds ID:PASS into the URL as userinfo.
+// e.g. "https://ipv4.mydns.jp/login.html" → "https://ID:PASS@ipv4.mydns.jp/login.html"
+func urlWithCreds(rawURL, id, pass string) (string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	u.User = url.UserPassword(id, pass)
+	return u.String(), nil
 }
