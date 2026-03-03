@@ -5,28 +5,17 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 )
 
-const mydnsUpdateURL = "https://www.mydns.jp/login.html"
-
-// MyDNSConfig holds credentials for a MyDNS account.
-type MyDNSConfig struct {
-	MasterID string
-	Password string
-}
-
-// UpdateMyDNS sends an IP update to MyDNS for all configured domains.
-// MyDNS uses HTTP Basic Auth; the IP is taken from the client's source address,
-// so the request itself is the update (no explicit IP parameter).
-// Returns a slice of per-domain results (nil error = success).
-func UpdateMyDNS(cfg MyDNSConfig, ipv4, ipv6 string) []ProviderResult {
-	// MyDNS updates by authenticated request — the server reads source IP.
-	// ipv4/ipv6 hints are used only for logging.
-	result := doMyDNSRequest(cfg, ipv4)
-	return []ProviderResult{result}
+// MyDNSEntry mirrors config.MyDNSEntry to avoid import cycles.
+type MyDNSEntry struct {
+	ID     string
+	Pass   string
+	Domain string
+	IPv4   bool
+	IPv6   bool
 }
 
 // ProviderResult captures the outcome of a single DDNS update attempt.
@@ -37,32 +26,43 @@ type ProviderResult struct {
 	Err      error
 }
 
-func doMyDNSRequest(cfg MyDNSConfig, ip string) ProviderResult {
+// UpdateMyDNSIPv4 sends an IPv4 update for a single MyDNS entry.
+// MyDNS authenticates via HTTP Basic Auth; the server reads the source IP
+// from the request automatically (no explicit IP parameter needed).
+func UpdateMyDNSIPv4(entry MyDNSEntry, updateURL string) ProviderResult {
+	return doMyDNSRequest(entry, updateURL, "ipv4")
+}
+
+// UpdateMyDNSIPv6 sends an IPv6 update for a single MyDNS entry.
+func UpdateMyDNSIPv6(entry MyDNSEntry, updateURL string) ProviderResult {
+	return doMyDNSRequest(entry, updateURL, "ipv6")
+}
+
+func doMyDNSRequest(entry MyDNSEntry, updateURL, proto string) ProviderResult {
+	pr := ProviderResult{
+		Provider: "mydns",
+		Domain:   entry.Domain,
+	}
+
 	client := &http.Client{Timeout: 15 * time.Second}
 
-	data := url.Values{}
-	data.Set("MASTERID", cfg.MasterID)
-	data.Set("PASSWORD", cfg.Password)
-
-	req, err := http.NewRequest(http.MethodPost, mydnsUpdateURL, strings.NewReader(data.Encode()))
+	req, err := http.NewRequest(http.MethodGet, updateURL, nil)
 	if err != nil {
-		return ProviderResult{Provider: "mydns", IP: ip, Err: fmt.Errorf("request build: %w", err)}
+		pr.Err = fmt.Errorf("request build: %w", err)
+		return pr
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth(entry.ID, entry.Pass)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return ProviderResult{Provider: "mydns", IP: ip, Err: fmt.Errorf("http: %w", err)}
+		pr.Err = fmt.Errorf("%s http: %w", proto, err)
+		return pr
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 
 	if resp.StatusCode != http.StatusOK {
-		return ProviderResult{
-			Provider: "mydns",
-			IP:       ip,
-			Err:      fmt.Errorf("http status %d: %s", resp.StatusCode, strings.TrimSpace(string(body))),
-		}
+		pr.Err = fmt.Errorf("%s status %d: %s", proto, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	return ProviderResult{Provider: "mydns", IP: ip}
+	return pr
 }

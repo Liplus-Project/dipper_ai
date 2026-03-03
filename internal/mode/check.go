@@ -24,10 +24,16 @@ func Check(cfg *config.Config) error {
 		return nil
 	}
 
-	// --- IP cache gate ---
-	ipCacheGate := timegate.New(cfg.StateDir, "ip_cache", time.Duration(cfg.IPCacheTime)*time.Minute)
-	if ipCacheGate.ShouldRun() {
-		// Refresh IP cache
+	// --- IP cache gate (0 = disabled: always refresh) ---
+	shouldRefresh := true
+	if cfg.IPCacheTime > 0 {
+		ipCacheGate := timegate.New(cfg.StateDir, "ip_cache", time.Duration(cfg.IPCacheTime)*time.Minute)
+		shouldRefresh = ipCacheGate.ShouldRun()
+		if shouldRefresh {
+			defer func() { _ = ipCacheGate.Touch() }()
+		}
+	}
+	if shouldRefresh {
 		fetched, err := ip.Fetch(cfg.IPv4, cfg.IPv6)
 		if err != nil {
 			_ = st.AppendError(fmt.Sprintf("check_ip_fetch_error: %v", err))
@@ -39,7 +45,6 @@ func Check(cfg *config.Config) error {
 		if fetched.IPv6 != "" {
 			_ = st.WriteIP("ipv6", fetched.IPv6)
 		}
-		_ = ipCacheGate.Touch()
 	}
 
 	// Output current state to stdout

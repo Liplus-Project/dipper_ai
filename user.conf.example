@@ -7,6 +7,7 @@
 #   KEY=on / off       boolean (also accepts: 1/0, true/false)
 #   # comment          whole-line comment
 #   VALUE # comment    inline comment (value must not contain " #")
+#   "value"            surrounding quotes are stripped automatically
 
 # ---------------------------------------------------------------------------
 # State directory  (cache files, lock files, timestamps)
@@ -14,44 +15,66 @@
 STATE_DIR=/etc/dipper_ai/state
 
 # ---------------------------------------------------------------------------
-# Time gates  (minutes; minimum 1)
-# ---------------------------------------------------------------------------
-UPDATE_TIME=60          # How often update mode may run
-DDNS_TIME=10            # How often DDNS updates are sent (when IP changes)
-IP_CACHE_TIME=30        # How long the IP cache is valid
-ERR_CHK_TIME=120        # How often err_mail mode may send a notification
-
-# ---------------------------------------------------------------------------
 # IP address families
 # ---------------------------------------------------------------------------
-IPV4=on                 # Fetch and track IPv4
-IPV6=on                 # Fetch and track IPv6
-IPV4_DDNS=on            # Update DDNS with IPv4 (A record)
-IPV6_DDNS=on            # Update DDNS with IPv6 (AAAA record)
+IPV4=on                 # Fetch and track IPv4 (default: on)
+IPV6=off                # Fetch and track IPv6 (default: off)
+IPV4_DDNS=on            # Update DDNS with IPv4 / A record (default: on)
+IPV6_DDNS=on            # Update DDNS with IPv6 / AAAA record (default: on)
+
+# ---------------------------------------------------------------------------
+# Time gates  (minutes)
+#   UPDATE_TIME   min 3    — how often the periodic update runs
+#   DDNS_TIME     min 1    — how often DDNS is updated when IP changes
+#   IP_CACHE_TIME 0=off    — how long the IP cache is valid (min 15 when on)
+#   ERR_CHK_TIME  0=off    — how often err_mail mode runs  (min  1 when on)
+# ---------------------------------------------------------------------------
+UPDATE_TIME=1440        # 1 day
+DDNS_TIME=1             # 1 minute
+IP_CACHE_TIME=0         # disabled
+ERR_CHK_TIME=0          # disabled
 
 # ---------------------------------------------------------------------------
 # MyDNS  (https://www.mydns.jp)
+# Add more entries as MYDNS_1_*, MYDNS_2_*, etc.
 # ---------------------------------------------------------------------------
-MYDNS_ENABLED=off
-MYDNS_MASTERID=
-MYDNS_PASSWORD=
+#MYDNS_0_ID=mydnsXXXXXX
+#MYDNS_0_PASS=yourpassword
+#MYDNS_0_DOMAIN=home.example.com
+#MYDNS_0_IPV4=on
+#MYDNS_0_IPV6=off
+
+# Optional: override default login endpoints
+#MYDNS_IPV4_URL=https://ipv4.mydns.jp/login.html
+#MYDNS_IPV6_URL=https://ipv6.mydns.jp/login.html
 
 # ---------------------------------------------------------------------------
-# Cloudflare  (one entry per DNS record; add CF_1_*, CF_2_* for more)
+# Cloudflare  (one block per DNS record; add CF_1_*, CF_2_*, etc. for more)
+# CF_0_ZONE  : zone name, e.g. "example.com"  (zone ID is resolved automatically)
+# CF_0_DOMAIN: FQDN of the record, e.g. "home.example.com"
 # ---------------------------------------------------------------------------
-CF_0_ENABLED=off
-CF_0_TOKEN=              # Cloudflare API token (DNS:Edit permission)
-CF_0_ZONE_ID=            # Zone ID from Cloudflare dashboard
-CF_0_NAME=               # FQDN to update (e.g. home.example.com)
+#CF_0_ENABLED=off
+#CF_0_API=your_cloudflare_api_token
+#CF_0_ZONE=example.com
+#CF_0_DOMAIN=home.example.com
+#CF_0_IPV4=on
+#CF_0_IPV6=off
 
 #CF_1_ENABLED=off
-#CF_1_TOKEN=
-#CF_1_ZONE_ID=
-#CF_1_NAME=
+#CF_1_API=your_cloudflare_api_token
+#CF_1_ZONE=example.com
+#CF_1_DOMAIN=other.example.com
+#CF_1_IPV4=on
+#CF_1_IPV6=off
+
+# Optional: override Cloudflare API base URL
+#CLOUDFLARE_URL=https://api.cloudflare.com/client/v4/zones
 
 # ---------------------------------------------------------------------------
-# Error notification  (via sendmail)
+# Email notification  (via sendmail)
+#   EMAIL_CHK_DDNS  notify when IP address changes
+#   EMAIL_UP_DDNS   notify on every periodic update
 # ---------------------------------------------------------------------------
-ERR_MAIL_ENABLED=off
-ERR_THRESHOLD=3          # Send notification after this many accumulated errors
-MAIL_TO=                 # Recipient address
+#EMAIL_CHK_DDNS=off
+#EMAIL_UP_DDNS=off
+#EMAIL_ADR=you@example.com

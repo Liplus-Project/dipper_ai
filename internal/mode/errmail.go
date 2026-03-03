@@ -14,8 +14,8 @@ import (
 // ErrMail aggregates errors and sends a notification if the threshold is met.
 // Equivalent to `dipper err_mail`.
 func ErrMail(cfg *config.Config) error {
-	if !cfg.ErrMailEnabled {
-		return nil // notification suppressed per config
+	if cfg.ErrChkTime == 0 || cfg.EmailAddr == "" {
+		return nil // disabled or no recipient configured
 	}
 
 	// --- Time gate: ERR_CHK_TIME ---
@@ -34,16 +34,16 @@ func ErrMail(cfg *config.Config) error {
 		return err
 	}
 
-	if len(errors) < cfg.ErrThreshold {
+	if len(errors) == 0 {
 		_ = errGate.Touch()
-		return nil // threshold not met
+		return nil
 	}
 
 	// --- Send notification ---
 	body := fmt.Sprintf("dipper_ai error report (%d errors):\n\n%s\n",
 		len(errors), strings.Join(errors, "\n"))
 
-	if err := sendMail(cfg.MailTo, "dipper_ai: error notification", body); err != nil {
+	if err := sendMail(cfg.EmailAddr, "dipper_ai: error notification", body); err != nil {
 		_ = st.AppendError(fmt.Sprintf("sendmail_failed: %v", err))
 		return fmt.Errorf("sendmail: %w", err)
 	}
