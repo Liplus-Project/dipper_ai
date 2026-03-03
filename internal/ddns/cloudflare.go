@@ -9,50 +9,48 @@ import (
 	"time"
 )
 
-const cfAPIBase = "https://api.cloudflare.com/client/v4"
-
-// CloudflareEntry holds credentials and target for one Cloudflare DNS record.
+// CloudflareEntry mirrors config.CloudflareEntry to avoid import cycles.
 type CloudflareEntry struct {
-	Token  string // API token with DNS:Edit permission
-	ZoneID string
-	Name   string // FQDN of the record (e.g. "home.example.com")
+	API    string // API token with DNS:Edit permission
+	Zone   string // zone name (e.g. "example.com")
+	Domain string // FQDN of the record (e.g. "home.example.com")
 }
 
-// UpdateCloudflare updates all given Cloudflare entries to point to ip.
+// UpdateCloudflare updates a Cloudflare DNS record.
 // recType should be "A" (IPv4) or "AAAA" (IPv6).
-func UpdateCloudflare(entries []CloudflareEntry, ip, recType string) []ProviderResult {
-	results := make([]ProviderResult, 0, len(entries))
-	for _, e := range entries {
-		results = append(results, updateCFEntry(e, ip, recType))
-	}
-	return results
-}
-
-func updateCFEntry(e CloudflareEntry, ip, recType string) ProviderResult {
-	pr := ProviderResult{Provider: "cloudflare", Domain: e.Name, IP: ip}
+// zonesURL is the Cloudflare zones API base (from config.CloudflareURL).
+func UpdateCloudflare(entry CloudflareEntry, ip, recType, zonesURL string) ProviderResult {
+	pr := ProviderResult{Provider: "cloudflare", Domain: entry.Domain, IP: ip}
 
 	client := &http.Client{Timeout: 15 * time.Second}
 
-	// 1. Find the record ID
-	recID, err := cfFindRecord(client, e, recType)
+	// 1. Resolve zone name → zone ID
+	zoneID, err := cfResolveZone(client, entry, zonesURL)
+	if err != nil {
+		pr.Err = fmt.Errorf("zone lookup: %w", err)
+		return pr
+	}
+
+	// 2. Find the existing DNS record ID
+	recID, err := cfFindRecord(client, entry, zoneID, recType, zonesURL)
 	if err != nil {
 		pr.Err = fmt.Errorf("find record: %w", err)
 		return pr
 	}
 
-	// 2. PATCH the record
+	// 3. PATCH the record
 	payload := map[string]interface{}{
 		"type":    recType,
-		"name":    e.Name,
+		"name":    entry.Domain,
 		"content": ip,
 		"ttl":     1, // auto
 		"proxied": false,
 	}
 	body, _ := json.Marshal(payload)
-	url := fmt.Sprintf("%s/zones/%s/dns_records/%s", cfAPIBase, e.ZoneID, recID)
+	url := fmt.Sprintf("%s/%s/dns_records/%s", zonesURL, zoneID, recID)
 
 	req, _ := http.NewRequest(http.MethodPatch, url, bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+e.Token)
+	req.Header.Set("Authorization", "Bearer "+entry.API)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
@@ -82,11 +80,11 @@ func updateCFEntry(e CloudflareEntry, ip, recType string) ProviderResult {
 	return pr
 }
 
-// cfFindRecord returns the DNS record ID for the given zone/name/type.
-func cfFindRecord(client *http.Client, e CloudflareEntry, recType string) (string, error) {
-	url := fmt.Sprintf("%s/zones/%s/dns_records?type=%s&name=%s", cfAPIBase, e.ZoneID, recType, e.Name)
+// cfResolveZone returns the zone ID for the given zone name.
+func cfResolveZone(client *http.Client, entry CloudflareEntry, zonesURL string) (string, error) {
+	url := fmt.Sprintf("%s?name=%s", zonesURL, entry.Zone)
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	req.Header.Set("Authorization", "Bearer "+e.Token)
+	req.Header.Set("Authorization", "Bearer "+entry.API)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -103,7 +101,33 @@ func cfFindRecord(client *http.Client, e CloudflareEntry, recType string) (strin
 		return "", err
 	}
 	if len(result.Result) == 0 {
-		return "", fmt.Errorf("no %s record found for %s in zone %s", recType, e.Name, e.ZoneID)
+		return "", fmt.Errorf("zone %q not found", entry.Zone)
+	}
+	return result.Result[0].ID, nil
+}
+
+// cfFindRecord returns the DNS record ID for the given zone/domain/type.
+func cfFindRecord(client *http.Client, entry CloudflareEntry, zoneID, recType, zonesURL string) (string, error) {
+	url := fmt.Sprintf("%s/%s/dns_records?type=%s&name=%s", zonesURL, zoneID, recType, entry.Domain)
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Authorization", "Bearer "+entry.API)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Result []struct {
+			ID string `json:"id"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&result); err != nil {
+		return "", err
+	}
+	if len(result.Result) == 0 {
+		return "", fmt.Errorf("no %s record found for %s in zone %s", recType, entry.Domain, entry.Zone)
 	}
 	return result.Result[0].ID, nil
 }
