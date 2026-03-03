@@ -1,0 +1,57 @@
+# dipper_ai user.conf
+# Copy this file to user.conf and fill in your credentials.
+# Place at /etc/dipper_ai/user.conf (or set DIPPER_AI_CONFIG env var).
+#
+# Format rules:
+#   KEY=value          plain assignment
+#   KEY=on / off       boolean (also accepts: 1/0, true/false)
+#   # comment          whole-line comment
+#   VALUE # comment    inline comment (value must not contain " #")
+
+# ---------------------------------------------------------------------------
+# State directory  (cache files, lock files, timestamps)
+# ---------------------------------------------------------------------------
+STATE_DIR=/etc/dipper_ai/state
+
+# ---------------------------------------------------------------------------
+# Time gates  (minutes; minimum 1)
+# ---------------------------------------------------------------------------
+UPDATE_TIME=60          # How often update mode may run
+DDNS_TIME=10            # How often DDNS updates are sent (when IP changes)
+IP_CACHE_TIME=30        # How long the IP cache is valid
+ERR_CHK_TIME=120        # How often err_mail mode may send a notification
+
+# ---------------------------------------------------------------------------
+# IP address families
+# ---------------------------------------------------------------------------
+IPV4=on                 # Fetch and track IPv4
+IPV6=on                 # Fetch and track IPv6
+IPV4_DDNS=on            # Update DDNS with IPv4 (A record)
+IPV6_DDNS=on            # Update DDNS with IPv6 (AAAA record)
+
+# ---------------------------------------------------------------------------
+# MyDNS  (https://www.mydns.jp)
+# ---------------------------------------------------------------------------
+MYDNS_ENABLED=off
+MYDNS_MASTERID=
+MYDNS_PASSWORD=
+
+# ---------------------------------------------------------------------------
+# Cloudflare  (one entry per DNS record; add CF_1_*, CF_2_* for more)
+# ---------------------------------------------------------------------------
+CF_0_ENABLED=off
+CF_0_TOKEN=              # Cloudflare API token (DNS:Edit permission)
+CF_0_ZONE_ID=            # Zone ID from Cloudflare dashboard
+CF_0_NAME=               # FQDN to update (e.g. home.example.com)
+
+#CF_1_ENABLED=off
+#CF_1_TOKEN=
+#CF_1_ZONE_ID=
+#CF_1_NAME=
+
+# ---------------------------------------------------------------------------
+# Error notification  (via sendmail)
+# ---------------------------------------------------------------------------
+ERR_MAIL_ENABLED=off
+ERR_THRESHOLD=3          # Send notification after this many accumulated errors
+MAIL_TO=                 # Recipient address
