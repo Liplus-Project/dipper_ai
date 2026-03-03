@@ -2,7 +2,7 @@
 # uninstall.sh — removes dipper_ai from the system
 set -euo pipefail
 
-INSTALL_DIR="/usr/local/bin"
+INSTALL_DIR="/usr/bin"
 SYSTEMD_DIR="/etc/systemd/system"
 
 if [[ $EUID -ne 0 ]]; then

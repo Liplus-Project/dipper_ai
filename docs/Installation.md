@@ -58,7 +58,7 @@ sudo bash scripts/install.sh
 
 | ファイル | 配置先 |
 |----------|--------|
-| `dipper_ai` バイナリ | `/usr/local/bin/dipper_ai` |
+| `dipper_ai` バイナリ | `/usr/bin/dipper_ai` |
 | 設定サンプル | `/etc/dipper_ai/user.conf.example` |
 | systemd サービス | `/etc/systemd/system/dipper_ai.service` |
 | systemd タイマー | `/etc/systemd/system/dipper_ai.timer` |

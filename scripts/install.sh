@@ -3,7 +3,7 @@
 set -euo pipefail
 
 BINARY="./dipper_ai"
-INSTALL_DIR="/usr/local/bin"
+INSTALL_DIR="/usr/bin"
 CONF_DIR="/etc/dipper_ai"
 SYSTEMD_DIR="/etc/systemd/system"
 
