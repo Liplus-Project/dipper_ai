@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/Liplus-Project/dipper_ai/internal/config"
-	"github.com/Liplus-Project/dipper_ai/internal/ip"
 	"github.com/Liplus-Project/dipper_ai/internal/state"
 	"github.com/Liplus-Project/dipper_ai/internal/timegate"
 )
@@ -34,7 +33,7 @@ func Check(cfg *config.Config) error {
 		}
 	}
 	if shouldRefresh {
-		fetched, err := ip.Fetch(cfg.IPv4, cfg.IPv6)
+		fetched, err := ipFetch(cfg.IPv4, cfg.IPv6)
 		if err != nil {
 			_ = st.AppendError(fmt.Sprintf("check_ip_fetch_error: %v", err))
 			return err
