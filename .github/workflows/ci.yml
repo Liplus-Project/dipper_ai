@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      matrix:
+        include:
+          - os: almalinux9
+            image: almalinux:9
+          - os: almalinux10
+            image: almalinux:10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        run: |
+          dnf install -y golang --nogpgcheck 2>/dev/null || \
+          (curl -sL https://go.dev/dl/go1.23.6.linux-amd64.tar.gz | tar -xz -C /usr/local)
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Test
+        run: go test -v ./...

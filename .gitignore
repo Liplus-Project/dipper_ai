@@ -1,0 +1,15 @@
+# Build output
+/dipper_ai
+*.test
+
+# Test artifacts
+/testdata/output/
+/testdata/artifacts/
+
+# Config with real credentials (never commit)
+user.conf
+*.conf
+!user.conf.example
+
+# Go
+vendor/

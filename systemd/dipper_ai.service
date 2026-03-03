@@ -1,0 +1,14 @@
+[Unit]
+Description=dipper_ai DDNS manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/etc/dipper_ai
+ExecStart=/usr/local/bin/dipper_ai update
+ExecStartPost=/usr/local/bin/dipper_ai check
+ExecStartPost=/usr/local/bin/dipper_ai err_mail
+
+[Install]
+WantedBy=multi-user.target
