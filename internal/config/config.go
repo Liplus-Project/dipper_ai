@@ -80,16 +80,22 @@ func Load() (*Config, error) {
 }
 
 // configFilePath resolves the config file path.
-// Priority: DIPPER_AI_CONFIG env → <WorkingDirectory>/user.conf
+// Priority:
+//  1. DIPPER_AI_CONFIG environment variable
+//  2. user.conf in the current working directory
+//  3. /etc/dipper_ai/user.conf  (system-wide default)
 func configFilePath() string {
 	if v := os.Getenv("DIPPER_AI_CONFIG"); v != "" {
 		return v
 	}
 	wd, err := os.Getwd()
-	if err != nil {
-		wd = "/etc/dipper_ai"
+	if err == nil {
+		local := filepath.Join(wd, "user.conf")
+		if _, err := os.Stat(local); err == nil {
+			return local
+		}
 	}
-	return filepath.Join(wd, "user.conf")
+	return "/etc/dipper_ai/user.conf"
 }
 
 // ParseFile parses a user.conf file and returns a validated Config.
