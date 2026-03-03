@@ -89,7 +89,8 @@ func TestBinary_Check_OutputsIPLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Pre-seed ip_cache gate as "just touched" so no dig call is made.
-	ts := fmt.Sprintf("%d\n", time.Now().Unix())
+	// timegate uses time.RFC3339, not a Unix integer.
+	ts := time.Now().Format(time.RFC3339)
 	if err := os.WriteFile(filepath.Join(stateDir, "gate_ip_cache"), []byte(ts), 0644); err != nil {
 		t.Fatal(err)
 	}
