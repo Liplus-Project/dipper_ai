@@ -6,7 +6,26 @@
 |------|------|
 | OS | AlmaLinux 9 / 10（他の systemd Linux でも動作可能） |
 | Go | 1.23 以上（ビルド時のみ） |
+| git | リポジトリのクローンに必要 |
 | 権限 | インストールスクリプトは root 必要 |
+
+### 依存パッケージのインストール（AlmaLinux）
+
+```bash
+# git
+sudo dnf install -y git
+
+# Go 1.23+（dnf のバージョンが古い場合は公式バイナリを使用）
+sudo dnf install -y golang
+go version  # 1.23 未満の場合は以下の手順で公式バイナリを導入
+
+# Go 公式バイナリ（dnf で 1.23+ が入らない場合）
+curl -LO https://go.dev/dl/go1.23.6.linux-amd64.tar.gz
+sudo tar -C /usr/local -xzf go1.23.6.linux-amd64.tar.gz
+echo 'export PATH=$PATH:/usr/local/go/bin' | sudo tee /etc/profile.d/go.sh
+source /etc/profile.d/go.sh
+go version
+```
 
 ---
 
