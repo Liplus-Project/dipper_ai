@@ -9,32 +9,40 @@ import (
 	"strings"
 )
 
-// Result holds the fetched IP addresses.
+// Result holds the fetched IP addresses and any per-family fetch errors.
+// A non-nil ErrIPv4 / ErrIPv6 means that family failed; the corresponding IP
+// field will be empty.  The other family is unaffected.
 type Result struct {
-	IPv4 string // empty if fetch failed or disabled
-	IPv6 string // empty if fetch failed or disabled
+	IPv4    string // empty if fetch failed or disabled
+	IPv6    string // empty if fetch failed or disabled
+	ErrIPv4 error  // non-nil if IPv4 fetch failed
+	ErrIPv6 error  // non-nil if IPv6 fetch failed
 }
 
 // Fetch retrieves the current public IPs according to the flags.
-// fetchV4 / fetchV6 enable/disable each address family.
-// Returns an error if any enabled address family fails to resolve a valid IP.
+// fetchV4 / fetchV6 enable/disable each address family independently.
+// A failure in one family is stored in Result.ErrIPv4 / Result.ErrIPv6 and
+// does NOT prevent the other family from being fetched.  The returned error
+// is always nil; callers should inspect the per-family Err fields.
 func Fetch(fetchV4, fetchV6 bool) (*Result, error) {
 	r := &Result{}
 
 	if fetchV4 {
-		ip, err := fetchIPv4()
+		ipv4, err := fetchIPv4()
 		if err != nil {
-			return nil, fmt.Errorf("IPv4 fetch failed: %w", err)
+			r.ErrIPv4 = fmt.Errorf("IPv4 fetch failed: %w", err)
+		} else {
+			r.IPv4 = ipv4
 		}
-		r.IPv4 = ip
 	}
 
 	if fetchV6 {
-		ip, err := fetchIPv6()
+		ipv6, err := fetchIPv6()
 		if err != nil {
-			return nil, fmt.Errorf("IPv6 fetch failed: %w", err)
+			r.ErrIPv6 = fmt.Errorf("IPv6 fetch failed: %w", err)
+		} else {
+			r.IPv6 = ipv6
 		}
-		r.IPv6 = ip
 	}
 
 	return r, nil

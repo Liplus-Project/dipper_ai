@@ -3,6 +3,7 @@ package mode
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/Liplus-Project/dipper_ai/internal/config"
@@ -31,16 +32,37 @@ func Update(cfg *config.Config) error {
 	// --- Time gate: UPDATE_TIME ---
 	updateGate := timegate.New(cfg.StateDir, "update", time.Duration(cfg.UpdateTime)*time.Minute)
 	if !updateGate.ShouldRun() {
+		fmt.Fprintln(os.Stderr, "dipper_ai update: gate active, skipping")
 		return nil
 	}
 
 	// --- Fetch IPs ---
 	wantV4 := cfg.IPv4 && cfg.IPv4DDNS
 	wantV6 := cfg.IPv6 && cfg.IPv6DDNS
-	fetched, err := ipFetch(wantV4, wantV6)
-	if err != nil {
-		_ = st.AppendError(fmt.Sprintf("ip_fetch_error: %v", err))
-		return err
+	fetched, _ := ipFetch(wantV4, wantV6)
+
+	// Log per-family fetch errors; IPv6 failure alone is non-fatal.
+	if wantV4 && fetched.ErrIPv4 != nil {
+		_ = st.AppendError(fmt.Sprintf("ip_fetch_error ipv4: %v", fetched.ErrIPv4))
+		fmt.Fprintf(os.Stderr, "dipper_ai update: IPv4 fetch failed: %v\n", fetched.ErrIPv4)
+	}
+	if wantV6 && fetched.ErrIPv6 != nil {
+		_ = st.AppendError(fmt.Sprintf("ip_fetch_error ipv6: %v", fetched.ErrIPv6))
+		fmt.Fprintf(os.Stderr, "dipper_ai update: IPv6 fetch failed: %v\n", fetched.ErrIPv6)
+	}
+	// Abort only when nothing usable was fetched at all.
+	if fetched.IPv4 == "" && fetched.IPv6 == "" && (wantV4 || wantV6) {
+		if fetched.ErrIPv4 != nil {
+			return fetched.ErrIPv4
+		}
+		return fetched.ErrIPv6
+	}
+
+	if fetched.IPv4 != "" {
+		fmt.Fprintf(os.Stderr, "dipper_ai update: IPv4=%s\n", fetched.IPv4)
+	}
+	if fetched.IPv6 != "" {
+		fmt.Fprintf(os.Stderr, "dipper_ai update: IPv6=%s\n", fetched.IPv6)
 	}
 
 	// --- IP change detection ---
@@ -66,6 +88,7 @@ func Update(cfg *config.Config) error {
 	}
 
 	if !ipChanged {
+		fmt.Fprintln(os.Stderr, "dipper_ai update: IP unchanged, skipping DDNS")
 		_ = updateGate.Touch()
 		return nil
 	}
@@ -73,6 +96,7 @@ func Update(cfg *config.Config) error {
 	// --- DDNS time gate: DDNS_TIME ---
 	ddnsGate := timegate.New(cfg.StateDir, "ddns", time.Duration(cfg.DDNSTime)*time.Minute)
 	if !ddnsGate.ShouldRun() {
+		fmt.Fprintln(os.Stderr, "dipper_ai update: DDNS gate active, skipping")
 		return nil
 	}
 
@@ -91,9 +115,11 @@ func Update(cfg *config.Config) error {
 			if r.Err != nil {
 				_ = st.WriteDDNSResult(key, "fail:"+r.Err.Error())
 				_ = st.AppendError(fmt.Sprintf("ddns_error mydns[%d] ipv4: %v", i, r.Err))
+				fmt.Fprintf(os.Stderr, "dipper_ai update: mydns[%d] %s ipv4: FAIL: %v\n", i, entry.Domain, r.Err)
 				updateErr = r.Err
 			} else {
 				_ = st.WriteDDNSResult(key, "ok")
+				fmt.Fprintf(os.Stderr, "dipper_ai update: mydns[%d] %s ipv4: ok\n", i, entry.Domain)
 			}
 		}
 		if wantV6 && entry.IPv6 && fetched.IPv6 != "" {
@@ -102,9 +128,11 @@ func Update(cfg *config.Config) error {
 			if r.Err != nil {
 				_ = st.WriteDDNSResult(key, "fail:"+r.Err.Error())
 				_ = st.AppendError(fmt.Sprintf("ddns_error mydns[%d] ipv6: %v", i, r.Err))
+				fmt.Fprintf(os.Stderr, "dipper_ai update: mydns[%d] %s ipv6: FAIL: %v\n", i, entry.Domain, r.Err)
 				updateErr = r.Err
 			} else {
 				_ = st.WriteDDNSResult(key, "ok")
+				fmt.Fprintf(os.Stderr, "dipper_ai update: mydns[%d] %s ipv6: ok\n", i, entry.Domain)
 			}
 		}
 	}
@@ -125,9 +153,11 @@ func Update(cfg *config.Config) error {
 			if r.Err != nil {
 				_ = st.WriteDDNSResult(key, "fail:"+r.Err.Error())
 				_ = st.AppendError(fmt.Sprintf("ddns_error cloudflare[%d] A: %v", i, r.Err))
+				fmt.Fprintf(os.Stderr, "dipper_ai update: cf[%d] %s A: FAIL: %v\n", i, cf.Domain, r.Err)
 				updateErr = r.Err
 			} else {
 				_ = st.WriteDDNSResult(key, "ok")
+				fmt.Fprintf(os.Stderr, "dipper_ai update: cf[%d] %s A: ok\n", i, cf.Domain)
 			}
 		}
 		if wantV6 && cf.IPv6 && fetched.IPv6 != "" {
@@ -136,9 +166,11 @@ func Update(cfg *config.Config) error {
 			if r.Err != nil {
 				_ = st.WriteDDNSResult(key, "fail:"+r.Err.Error())
 				_ = st.AppendError(fmt.Sprintf("ddns_error cloudflare[%d] AAAA: %v", i, r.Err))
+				fmt.Fprintf(os.Stderr, "dipper_ai update: cf[%d] %s AAAA: FAIL: %v\n", i, cf.Domain, r.Err)
 				updateErr = r.Err
 			} else {
 				_ = st.WriteDDNSResult(key, "ok")
+				fmt.Fprintf(os.Stderr, "dipper_ai update: cf[%d] %s AAAA: ok\n", i, cf.Domain)
 			}
 		}
 	}

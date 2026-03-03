@@ -24,6 +24,21 @@ func fakeFetch(v4, v6 string) func(bool, bool) (*ip.Result, error) {
 	}
 }
 
+// fakeFetchIPv6Err returns IPv4 successfully but simulates an IPv6 fetch error.
+// This replicates the issue #11 scenario (host has no IPv6 connectivity).
+func fakeFetchIPv6Err(v4 string, v6Err error) func(bool, bool) (*ip.Result, error) {
+	return func(wantV4, wantV6 bool) (*ip.Result, error) {
+		r := &ip.Result{}
+		if wantV4 {
+			r.IPv4 = v4
+		}
+		if wantV6 {
+			r.ErrIPv6 = v6Err
+		}
+		return r, nil
+	}
+}
+
 // overrideFetch replaces ipFetch for the duration of a test.
 func overrideFetch(t *testing.T, fn func(bool, bool) (*ip.Result, error)) {
 	t.Helper()
@@ -127,6 +142,38 @@ func TestUpdate_DDNSError_RecordedInState(t *testing.T) {
 	err := Update(cfg)
 	if err == nil {
 		t.Error("expected error from DDNS failure")
+	}
+}
+
+// TestUpdate_IPv6FetchFail_IPv4Proceeds is the regression test for issue #11.
+// When IPv6 fetch fails (e.g. the host has no IPv6 connectivity), the update
+// must still proceed and update DDNS for IPv4.
+func TestUpdate_IPv6FetchFail_IPv4Proceeds(t *testing.T) {
+	cfg := baseCfg(t)
+	cfg.IPv6 = true
+	cfg.IPv6DDNS = true
+	cfg.MyDNS = []config.MyDNSEntry{
+		{ID: "id0", Pass: "pass0", Domain: "home.example.com", IPv4: true, IPv6: true},
+	}
+
+	overrideFetch(t, fakeFetchIPv6Err("1.2.3.4", errors.New("dig ipv6: exit status 1")))
+	calls := captureMyDNSCalls(t)
+
+	if err := Update(cfg); err != nil {
+		t.Fatalf("IPv6 failure should not abort the update: %v", err)
+	}
+
+	hasV4 := false
+	for _, c := range *calls {
+		if c == "ipv4:home.example.com" {
+			hasV4 = true
+		}
+		if c == "ipv6:home.example.com" {
+			t.Error("IPv6 DDNS must not be called when IPv6 fetch failed")
+		}
+	}
+	if !hasV4 {
+		t.Error("IPv4 DDNS must still run even when IPv6 fetch failed")
 	}
 }
 
