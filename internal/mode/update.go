@@ -29,14 +29,7 @@ func Update(cfg *config.Config) error {
 		return err
 	}
 
-	// --- Time gate: UPDATE_TIME ---
-	updateGate := timegate.New(cfg.StateDir, "update", time.Duration(cfg.UpdateTime)*time.Minute)
-	if !updateGate.ShouldRun() {
-		fmt.Fprintln(os.Stderr, "dipper_ai update: gate active, skipping")
-		return nil
-	}
-
-	// --- Fetch IPs ---
+	// --- Fetch IPs (always — IP must be checked on every run) ---
 	wantV4 := cfg.IPv4 && cfg.IPv4DDNS
 	wantV6 := cfg.IPv6 && cfg.IPv6DDNS
 	fetched, _ := ipFetch(wantV4, wantV6)
@@ -66,6 +59,7 @@ func Update(cfg *config.Config) error {
 	}
 
 	// --- IP change detection ---
+	// Cache is initialised to 0.0.0.0 / :: so first run always triggers DDNS.
 	ipChanged := false
 
 	if fetched.IPv4 != "" {
@@ -87,15 +81,25 @@ func Update(cfg *config.Config) error {
 		}
 	}
 
-	if !ipChanged {
+	// UPDATE_TIME: force re-sync even when IP is unchanged (catches external
+	// DDNS edits).  ipChanged bypasses this gate so IP changes are acted on
+	// immediately regardless of how recently the last sync ran.
+	updateGate := timegate.New(cfg.StateDir, "update", time.Duration(cfg.UpdateTime)*time.Minute)
+	forceSync := updateGate.ShouldRun()
+
+	if !ipChanged && !forceSync {
 		fmt.Fprintln(os.Stderr, "dipper_ai update: IP unchanged, skipping DDNS")
-		_ = updateGate.Touch()
 		return nil
+	}
+	if !ipChanged && forceSync {
+		fmt.Fprintln(os.Stderr, "dipper_ai update: forcing periodic re-sync")
 	}
 
 	// --- DDNS time gate: DDNS_TIME ---
+	// Bypassed on force-sync: if UPDATE_TIME (e.g. 24h) has elapsed then
+	// DDNS_TIME (e.g. 3min) has certainly elapsed too.
 	ddnsGate := timegate.New(cfg.StateDir, "ddns", time.Duration(cfg.DDNSTime)*time.Minute)
-	if !ddnsGate.ShouldRun() {
+	if !forceSync && !ddnsGate.ShouldRun() {
 		fmt.Fprintln(os.Stderr, "dipper_ai update: DDNS gate active, skipping")
 		return nil
 	}
@@ -175,7 +179,9 @@ func Update(cfg *config.Config) error {
 		}
 	}
 
-	_ = updateGate.Touch()
+	if forceSync {
+		_ = updateGate.Touch()
+	}
 	_ = ddnsGate.Touch()
 	return updateErr
 }
