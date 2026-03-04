@@ -112,9 +112,7 @@ func TestUpdate_IPChanged(t *testing.T) {
 		t.Fatalf("first run: %v", err)
 	}
 
-	// Reset update gate so second run is allowed
-	_ = os.Remove(cfg.StateDir + "/gate_update")
-	_ = os.Remove(cfg.StateDir + "/gate_ddns")
+	// IP change bypasses the DDNS gate — no need to remove any gate files.
 
 	// Second run with different IP
 	overrideFetch(t, fakeFetch("5.6.7.8", ""))
@@ -177,16 +175,17 @@ func TestUpdate_IPv6FetchFail_IPv4Proceeds(t *testing.T) {
 	}
 }
 
-// TestUpdate_ForceSync verifies that UPDATE_TIME triggers a DDNS re-sync even
-// when the IP has not changed (catches external DDNS edits / drift).
-func TestUpdate_ForceSync(t *testing.T) {
+// TestUpdate_Keepalive verifies that when DDNS_TIME elapses, DDNS is updated
+// even when the IP has not changed.  This is the "keepalive" behaviour that
+// restores externally reset DDNS records.
+func TestUpdate_Keepalive(t *testing.T) {
 	cfg := baseCfg(t)
 	cfg.MyDNS = []config.MyDNSEntry{{ID: "id0", Pass: "pass0", Domain: "home.example.com", IPv4: true}}
 
 	overrideFetch(t, fakeFetch("1.2.3.4", ""))
 	calls := captureMyDNSCalls(t)
 
-	// First run — IP written to cache, DDNS called.
+	// First run — IP written to cache, DDNS called, gate_ddns touched.
 	if err := Update(cfg); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
@@ -195,7 +194,7 @@ func TestUpdate_ForceSync(t *testing.T) {
 		t.Fatal("expected DDNS call on first run")
 	}
 
-	// Second run — same IP, gate_update still active → skip.
+	// Second run — same IP, gate_ddns still active → skip.
 	if err := Update(cfg); err != nil {
 		t.Fatalf("second run: %v", err)
 	}
@@ -203,15 +202,15 @@ func TestUpdate_ForceSync(t *testing.T) {
 		t.Errorf("expected no DDNS call when IP unchanged and gate active")
 	}
 
-	// Remove only the update gate to simulate UPDATE_TIME elapsed.
-	_ = os.Remove(cfg.StateDir + "/gate_update")
+	// Remove gate_ddns to simulate DDNS_TIME elapsed.
+	_ = os.Remove(cfg.StateDir + "/gate_ddns")
 
-	// Third run — same IP, but force-sync gate elapsed → DDNS must be called.
+	// Third run — same IP, but DDNS_TIME elapsed → keepalive → DDNS must fire.
 	if err := Update(cfg); err != nil {
-		t.Fatalf("force-sync run: %v", err)
+		t.Fatalf("keepalive run: %v", err)
 	}
 	if len(*calls) <= after1 {
-		t.Errorf("expected DDNS call on force-sync run (IP unchanged but UPDATE_TIME elapsed)")
+		t.Errorf("expected keepalive DDNS call when DDNS_TIME elapsed (IP unchanged)")
 	}
 }
 
