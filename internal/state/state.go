@@ -23,11 +23,15 @@ func New(dir string) (*Manager, error) {
 }
 
 // ReadIP returns the cached IP for the given key ("ipv4" or "ipv6").
-// Returns ("", nil) if not cached.
+// Returns ("0.0.0.0" / "::" , nil) when not yet cached so that any real
+// IP address is always treated as a change on first run.
 func (m *Manager) ReadIP(key string) (string, error) {
 	data, err := os.ReadFile(m.path("ip_" + key))
 	if os.IsNotExist(err) {
-		return "", nil
+		if key == "ipv6" {
+			return "::", nil
+		}
+		return "0.0.0.0", nil
 	}
 	if err != nil {
 		return "", err

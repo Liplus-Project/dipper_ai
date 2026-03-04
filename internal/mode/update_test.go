@@ -177,6 +177,62 @@ func TestUpdate_IPv6FetchFail_IPv4Proceeds(t *testing.T) {
 	}
 }
 
+// TestUpdate_ForceSync verifies that UPDATE_TIME triggers a DDNS re-sync even
+// when the IP has not changed (catches external DDNS edits / drift).
+func TestUpdate_ForceSync(t *testing.T) {
+	cfg := baseCfg(t)
+	cfg.MyDNS = []config.MyDNSEntry{{ID: "id0", Pass: "pass0", Domain: "home.example.com", IPv4: true}}
+
+	overrideFetch(t, fakeFetch("1.2.3.4", ""))
+	calls := captureMyDNSCalls(t)
+
+	// First run — IP written to cache, DDNS called.
+	if err := Update(cfg); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	after1 := len(*calls)
+	if after1 == 0 {
+		t.Fatal("expected DDNS call on first run")
+	}
+
+	// Second run — same IP, gate_update still active → skip.
+	if err := Update(cfg); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if len(*calls) != after1 {
+		t.Errorf("expected no DDNS call when IP unchanged and gate active")
+	}
+
+	// Remove only the update gate to simulate UPDATE_TIME elapsed.
+	_ = os.Remove(cfg.StateDir + "/gate_update")
+
+	// Third run — same IP, but force-sync gate elapsed → DDNS must be called.
+	if err := Update(cfg); err != nil {
+		t.Fatalf("force-sync run: %v", err)
+	}
+	if len(*calls) <= after1 {
+		t.Errorf("expected DDNS call on force-sync run (IP unchanged but UPDATE_TIME elapsed)")
+	}
+}
+
+// TestUpdate_InitialCacheIsZero verifies that a fresh install (no state files)
+// always triggers a DDNS update, because the implicit cache is 0.0.0.0.
+func TestUpdate_InitialCacheIsZero(t *testing.T) {
+	cfg := baseCfg(t)
+	cfg.MyDNS = []config.MyDNSEntry{{ID: "id0", Pass: "pass0", Domain: "home.example.com", IPv4: true}}
+
+	overrideFetch(t, fakeFetch("1.2.3.4", ""))
+	calls := captureMyDNSCalls(t)
+
+	// State dir is empty (t.TempDir) — no ip_ipv4 file exists.
+	if err := Update(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(*calls) == 0 {
+		t.Error("expected DDNS call on first run with empty state (cache=0.0.0.0)")
+	}
+}
+
 func TestUpdate_PerEntryIPv4IPv6(t *testing.T) {
 	cfg := baseCfg(t)
 	cfg.IPv6 = true
