@@ -149,6 +149,7 @@ func Update(cfg *config.Config) error {
 		cfEntry := ddns.CloudflareEntry{
 			API:    cf.API,
 			Zone:   cf.Zone,
+			ZoneID: cf.ZoneID,
 			Domain: cf.Domain,
 		}
 		if wantV4 && cf.IPv4 && fetched.IPv4 != "" {
