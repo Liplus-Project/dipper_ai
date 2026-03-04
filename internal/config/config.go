@@ -65,6 +65,7 @@ type CloudflareEntry struct {
 	Enabled bool
 	API     string // API token (DNS:Edit permission)
 	Zone    string // zone name  (e.g. "example.com")
+	ZoneID  string // zone ID (optional, skips zone name lookup when set)
 	Domain  string // FQDN to update (e.g. "home.example.com")
 	IPv4    bool
 	IPv6    bool
@@ -241,6 +242,7 @@ func buildConfig(kv map[string]string) (*Config, error) {
 			Enabled: boolVal(prefix+"ENABLED", false),
 			API:     strOr(prefix+"API", ""),
 			Zone:    strOr(prefix+"ZONE", ""),
+			ZoneID:  strOr(prefix+"ZONE_ID", ""), // optional: skip zone name lookup
 			Domain:  strOr(prefix+"DOMAIN", ""),
 			IPv4:    boolVal(prefix+"IPV4", true),
 			IPv6:    boolVal(prefix+"IPV6", false),
@@ -249,8 +251,8 @@ func buildConfig(kv map[string]string) (*Config, error) {
 			if e.API == "" {
 				errs = append(errs, fmt.Sprintf("%sAPI: required when enabled", prefix))
 			}
-			if e.Zone == "" {
-				errs = append(errs, fmt.Sprintf("%sZONE: required when enabled", prefix))
+			if e.Zone == "" && e.ZoneID == "" {
+				errs = append(errs, fmt.Sprintf("%sZONE or %sZONE_ID: at least one required when enabled", prefix, prefix))
 			}
 			if e.Domain == "" {
 				errs = append(errs, fmt.Sprintf("%sDOMAIN: required when enabled", prefix))

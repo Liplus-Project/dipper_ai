@@ -86,13 +86,15 @@ func cfMockServer(t *testing.T, zoneID, recordID string) *httptest.Server {
 		// Zone lookup: GET /zones?name=...
 		case r.Method == http.MethodGet && strings.Contains(r.URL.RawQuery, "name="):
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"result": []map[string]string{{"id": zoneID}},
+				"success": true,
+				"result":  []map[string]string{{"id": zoneID}},
 			})
 
 		// Record lookup: GET /zones/{zoneID}/dns_records?type=...
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "dns_records"):
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"result": []map[string]string{{"id": recordID}},
+				"success": true,
+				"result":  []map[string]string{{"id": recordID}},
 			})
 
 		// Record update: PATCH /zones/{zoneID}/dns_records/{recordID}
@@ -126,8 +128,8 @@ func TestCloudflare_Success(t *testing.T) {
 func TestCloudflare_ZoneNotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		// Always return empty result list
-		json.NewEncoder(w).Encode(map[string]interface{}{"result": []interface{}{}})
+		// success=true but empty result list → zone not found
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "result": []interface{}{}})
 	}))
 	defer srv.Close()
 
@@ -150,11 +152,12 @@ func TestCloudflare_RecordNotFound(t *testing.T) {
 		if callCount == 1 {
 			// Zone found
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"result": []map[string]string{{"id": "zone123"}},
+				"success": true,
+				"result":  []map[string]string{{"id": "zone123"}},
 			})
 		} else {
 			// No DNS records
-			json.NewEncoder(w).Encode(map[string]interface{}{"result": []interface{}{}})
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "result": []interface{}{}})
 		}
 	}))
 	defer srv.Close()
@@ -178,16 +181,18 @@ func TestCloudflare_APIError(t *testing.T) {
 		switch callCount {
 		case 1: // zone lookup
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"result": []map[string]string{{"id": "zone123"}},
+				"success": true,
+				"result":  []map[string]string{{"id": "zone123"}},
 			})
 		case 2: // record lookup
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"result": []map[string]string{{"id": "rec456"}},
+				"success": true,
+				"result":  []map[string]string{{"id": "rec456"}},
 			})
 		default: // PATCH returns API error
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"success": false,
-				"errors":  []map[string]string{{"message": "invalid token"}},
+				"errors":  []map[string]interface{}{{"code": 9109, "message": "invalid token"}},
 			})
 		}
 	}))
@@ -216,11 +221,13 @@ func TestCloudflare_BearerTokenSent(t *testing.T) {
 		switch callCount {
 		case 1:
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"result": []map[string]string{{"id": "zone123"}},
+				"success": true,
+				"result":  []map[string]string{{"id": "zone123"}},
 			})
 		case 2:
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"result": []map[string]string{{"id": "rec456"}},
+				"success": true,
+				"result":  []map[string]string{{"id": "rec456"}},
 			})
 		default:
 			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
@@ -233,5 +240,74 @@ func TestCloudflare_BearerTokenSent(t *testing.T) {
 
 	if gotAuth != "Bearer my-secret-token" {
 		t.Errorf("Authorization header: got %q, want %q", gotAuth, "Bearer my-secret-token")
+	}
+}
+
+// TestCloudflare_ZoneID_SkipsLookup verifies that when ZoneID is set, the
+// zone name lookup API call is skipped entirely.  This supports API tokens
+// that only have DNS:Edit (no Zone:Read) permission.
+func TestCloudflare_ZoneID_SkipsLookup(t *testing.T) {
+	zoneLookupCalled := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		// PATCH — record update
+		case r.Method == http.MethodPatch:
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+
+		// Record lookup: GET .../dns_records?...
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "dns_records"):
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"result":  []map[string]string{{"id": "rec999"}},
+			})
+
+		// Zone lookup: GET /zones?name=... (path does NOT contain dns_records)
+		case r.Method == http.MethodGet:
+			zoneLookupCalled = true
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "result": []interface{}{}})
+
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	entry := CloudflareEntry{
+		API:    "dns-only-token",
+		ZoneID: "direct-zone-id", // provided directly — no lookup needed
+		Domain: "home.example.com",
+	}
+	result := UpdateCloudflare(entry, "1.2.3.4", "A", srv.URL)
+
+	if result.Err != nil {
+		t.Fatalf("unexpected error: %v", result.Err)
+	}
+	if zoneLookupCalled {
+		t.Error("zone lookup API should NOT have been called when ZoneID is set")
+	}
+}
+
+// TestCloudflare_ZoneNotFound_WithAPIError verifies that a proper error is
+// returned when the Cloudflare API reports success=false on zone lookup.
+func TestCloudflare_ZoneNotFound_WithAPIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"errors":  []map[string]interface{}{{"code": 9109, "message": "Invalid access token"}},
+			"result":  []interface{}{},
+		})
+	}))
+	defer srv.Close()
+
+	entry := CloudflareEntry{API: "bad-token", Zone: "example.com", Domain: "home.example.com"}
+	result := UpdateCloudflare(entry, "1.2.3.4", "A", srv.URL)
+
+	if result.Err == nil {
+		t.Fatal("expected error when API returns success=false")
+	}
+	if !strings.Contains(result.Err.Error(), "Invalid access token") {
+		t.Errorf("error should contain API message, got: %v", result.Err)
 	}
 }
