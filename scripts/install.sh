@@ -19,6 +19,10 @@ fi
 
 echo "Installing binary..."
 install -m 0755 "$BINARY" "$INSTALL_DIR/dipper_ai"
+# Restore correct SELinux file context so systemd can execute the binary.
+if command -v restorecon &>/dev/null; then
+  restorecon -v "$INSTALL_DIR/dipper_ai"
+fi
 
 echo "Creating config directory..."
 mkdir -p "$CONF_DIR"
