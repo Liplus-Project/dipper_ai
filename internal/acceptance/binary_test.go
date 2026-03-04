@@ -78,29 +78,20 @@ func TestBinary_Update_ExitZero(t *testing.T) {
 	}
 }
 
-func TestBinary_Check_OutputsIPLine(t *testing.T) {
+func TestBinary_Check_GatedExitZero(t *testing.T) {
 	stateDir := t.TempDir()
-	// IPV4=on with a positive cache time so check reads the cached IP
-	// without calling dig. IPV6 stays off.
-	conf := writeConf(t, stateDir, "IPV4=on\nIP_CACHE_TIME=60\n")
+	// check uses UpdateTime as its gate duration (default 1440 min).
+	conf := writeConf(t, stateDir, "IPV4=on\n")
 
-	// Pre-seed cached IP state.
-	if err := os.WriteFile(filepath.Join(stateDir, "ip_ipv4"), []byte("1.2.3.4\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	// Pre-seed ip_cache gate as "just touched" so no dig call is made.
-	// timegate uses time.RFC3339, not a Unix integer.
+	// Pre-seed gate_check as "just touched" so check skips without network.
 	ts := time.Now().Format(time.RFC3339)
-	if err := os.WriteFile(filepath.Join(stateDir, "gate_ip_cache"), []byte(ts), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(stateDir, "gate_check"), []byte(ts), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	stdout, _, code := runBinary(t, conf, "check")
+	_, _, code := runBinary(t, conf, "check")
 	if code != 0 {
-		t.Errorf("expected exit 0 for check, got %d", code)
-	}
-	if !strings.Contains(stdout, "ipv4:") {
-		t.Errorf("expected stdout to contain 'ipv4:', got: %q", stdout)
+		t.Errorf("expected exit 0 for gated check, got %d", code)
 	}
 }
 
