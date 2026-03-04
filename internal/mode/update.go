@@ -23,6 +23,13 @@ var (
 
 // Update is the main DDNS update mode.
 // Equivalent to `dipper update`.
+//
+// Logic:
+//   - IP is fetched on every invocation.
+//   - If IP has changed → DDNS is updated immediately (bypass DDNS_TIME gate).
+//   - If DDNS_TIME has elapsed → periodic keepalive update regardless of IP change.
+//     This ensures DDNS records are restored even if someone resets them externally.
+//   - Otherwise → skip silently.
 func Update(cfg *config.Config) error {
 	st, err := state.New(cfg.StateDir)
 	if err != nil {
@@ -81,27 +88,23 @@ func Update(cfg *config.Config) error {
 		}
 	}
 
-	// UPDATE_TIME: force re-sync even when IP is unchanged (catches external
-	// DDNS edits).  ipChanged bypasses this gate so IP changes are acted on
-	// immediately regardless of how recently the last sync ran.
-	updateGate := timegate.New(cfg.StateDir, "update", time.Duration(cfg.UpdateTime)*time.Minute)
-	forceSync := updateGate.ShouldRun()
+	// --- DDNS_TIME gate ---
+	// Controls the periodic keepalive update interval.
+	// When DDNS_TIME has elapsed, DDNS is updated regardless of IP change
+	// to restore any externally reset records.
+	// When IP has changed, the gate is bypassed for an immediate update.
+	ddnsGate := timegate.New(cfg.StateDir, "ddns", time.Duration(cfg.DDNSTime)*time.Minute)
+	ddnsReady := ddnsGate.ShouldRun()
 
-	if !ipChanged && !forceSync {
+	if !ipChanged && !ddnsReady {
 		fmt.Fprintln(os.Stderr, "dipper_ai update: IP unchanged, skipping DDNS")
 		return nil
 	}
-	if !ipChanged && forceSync {
-		fmt.Fprintln(os.Stderr, "dipper_ai update: forcing periodic re-sync")
-	}
 
-	// --- DDNS time gate: DDNS_TIME ---
-	// Bypassed when IP has changed (act immediately) or when force-sync is set.
-	// Only applies when IP is unchanged and no force-sync requested.
-	ddnsGate := timegate.New(cfg.StateDir, "ddns", time.Duration(cfg.DDNSTime)*time.Minute)
-	if !ipChanged && !forceSync && !ddnsGate.ShouldRun() {
-		fmt.Fprintln(os.Stderr, "dipper_ai update: DDNS gate active, skipping")
-		return nil
+	if ipChanged {
+		fmt.Fprintln(os.Stderr, "dipper_ai update: IP changed — updating DDNS")
+	} else {
+		fmt.Fprintln(os.Stderr, "dipper_ai update: DDNS keepalive")
 	}
 
 	var updateErr error
@@ -180,9 +183,6 @@ func Update(cfg *config.Config) error {
 		}
 	}
 
-	if forceSync {
-		_ = updateGate.Touch()
-	}
 	_ = ddnsGate.Touch()
 	return updateErr
 }
