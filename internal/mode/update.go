@@ -96,10 +96,10 @@ func Update(cfg *config.Config) error {
 	}
 
 	// --- DDNS time gate: DDNS_TIME ---
-	// Bypassed on force-sync: if UPDATE_TIME (e.g. 24h) has elapsed then
-	// DDNS_TIME (e.g. 3min) has certainly elapsed too.
+	// Bypassed when IP has changed (act immediately) or when force-sync is set.
+	// Only applies when IP is unchanged and no force-sync requested.
 	ddnsGate := timegate.New(cfg.StateDir, "ddns", time.Duration(cfg.DDNSTime)*time.Minute)
-	if !forceSync && !ddnsGate.ShouldRun() {
+	if !ipChanged && !forceSync && !ddnsGate.ShouldRun() {
 		fmt.Fprintln(os.Stderr, "dipper_ai update: DDNS gate active, skipping")
 		return nil
 	}

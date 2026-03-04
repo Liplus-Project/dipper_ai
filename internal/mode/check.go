@@ -2,6 +2,8 @@ package mode
 
 import (
 	"fmt"
+	"net"
+	"os"
 	"time"
 
 	"github.com/Liplus-Project/dipper_ai/internal/config"
@@ -9,53 +11,157 @@ import (
 	"github.com/Liplus-Project/dipper_ai/internal/timegate"
 )
 
-// Check reports the current IP and cached DDNS state.
+// Package-level DNS lookup functions — overridable in tests.
+var (
+	dnsLookupA    = lookupARecord
+	dnsLookupAAAA = lookupAAAARecord
+)
+
+// Check resolves the DNS-registered IP for each configured DDNS domain and
+// compares it with the current external IP.  If any domain has a stale or
+// wrong registration, Check resets the IP cache and forces an immediate DDNS
+// update via Update().
+//
 // Equivalent to `dipper check`.
 func Check(cfg *config.Config) error {
-	st, err := state.New(cfg.StateDir)
-	if err != nil {
-		return err
-	}
-
-	// --- Time gate: DDNS_TIME (check gate) ---
-	checkGate := timegate.New(cfg.StateDir, "check", time.Duration(cfg.DDNSTime)*time.Minute)
+	// Check runs on its own schedule — use UpdateTime so it does not fire on
+	// every timer tick (which would cause spurious DNS lookups and race
+	// conditions immediately after a fresh update).
+	checkGate := timegate.New(cfg.StateDir, "check", time.Duration(cfg.UpdateTime)*time.Minute)
 	if !checkGate.ShouldRun() {
 		return nil
 	}
 
-	// --- IP cache gate (0 = disabled: always refresh) ---
-	shouldRefresh := true
-	if cfg.IPCacheTime > 0 {
-		ipCacheGate := timegate.New(cfg.StateDir, "ip_cache", time.Duration(cfg.IPCacheTime)*time.Minute)
-		shouldRefresh = ipCacheGate.ShouldRun()
-		if shouldRefresh {
-			defer func() { _ = ipCacheGate.Touch() }()
-		}
+	wantV4 := cfg.IPv4 && cfg.IPv4DDNS
+	wantV6 := cfg.IPv6 && cfg.IPv6DDNS
+
+	// Fetch current external IP.
+	fetched, _ := ipFetch(wantV4, wantV6)
+	if wantV4 && fetched.ErrIPv4 != nil {
+		fmt.Fprintf(os.Stderr, "dipper_ai check: IPv4 fetch error: %v\n", fetched.ErrIPv4)
 	}
-	if shouldRefresh {
-		fetched, err := ipFetch(cfg.IPv4, cfg.IPv6)
-		if err != nil {
-			_ = st.AppendError(fmt.Sprintf("check_ip_fetch_error: %v", err))
-			return err
+	if wantV6 && fetched.ErrIPv6 != nil {
+		fmt.Fprintf(os.Stderr, "dipper_ai check: IPv6 fetch error: %v\n", fetched.ErrIPv6)
+	}
+	if fetched.IPv4 == "" && fetched.IPv6 == "" && (wantV4 || wantV6) {
+		return fmt.Errorf("check: could not fetch current external IP")
+	}
+
+	mismatch := false
+
+	// --- Verify MyDNS domains ---
+	for _, m := range cfg.MyDNS {
+		if m.Domain == "" {
+			continue
 		}
-		if fetched.IPv4 != "" {
-			_ = st.WriteIP("ipv4", fetched.IPv4)
+		if wantV4 && m.IPv4 && fetched.IPv4 != "" {
+			registered, err := dnsLookupA(m.Domain)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "dipper_ai check: DNS A %s: %v → scheduling update\n", m.Domain, err)
+				mismatch = true
+			} else if registered != fetched.IPv4 {
+				fmt.Fprintf(os.Stderr, "dipper_ai check: %s A=%s want=%s → mismatch\n", m.Domain, registered, fetched.IPv4)
+				mismatch = true
+			} else {
+				fmt.Fprintf(os.Stderr, "dipper_ai check: %s A=%s ok\n", m.Domain, registered)
+			}
 		}
-		if fetched.IPv6 != "" {
-			_ = st.WriteIP("ipv6", fetched.IPv6)
+		if wantV6 && m.IPv6 && fetched.IPv6 != "" {
+			registered, err := dnsLookupAAAA(m.Domain)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "dipper_ai check: DNS AAAA %s: %v → scheduling update\n", m.Domain, err)
+				mismatch = true
+			} else if registered != fetched.IPv6 {
+				fmt.Fprintf(os.Stderr, "dipper_ai check: %s AAAA=%s want=%s → mismatch\n", m.Domain, registered, fetched.IPv6)
+				mismatch = true
+			} else {
+				fmt.Fprintf(os.Stderr, "dipper_ai check: %s AAAA=%s ok\n", m.Domain, registered)
+			}
 		}
 	}
 
-	// Output current state to stdout
-	if cfg.IPv4 {
-		v4, _ := st.ReadIP("ipv4")
-		fmt.Printf("ipv4: %s\n", v4)
-	}
-	if cfg.IPv6 {
-		v6, _ := st.ReadIP("ipv6")
-		fmt.Printf("ipv6: %s\n", v6)
+	// --- Verify Cloudflare domains ---
+	for _, cf := range cfg.Cloudflare {
+		if !cf.Enabled || cf.Domain == "" {
+			continue
+		}
+		if wantV4 && cf.IPv4 && fetched.IPv4 != "" {
+			registered, err := dnsLookupA(cf.Domain)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "dipper_ai check: DNS A %s: %v → scheduling update\n", cf.Domain, err)
+				mismatch = true
+			} else if registered != fetched.IPv4 {
+				fmt.Fprintf(os.Stderr, "dipper_ai check: %s A=%s want=%s → mismatch\n", cf.Domain, registered, fetched.IPv4)
+				mismatch = true
+			} else {
+				fmt.Fprintf(os.Stderr, "dipper_ai check: %s A=%s ok\n", cf.Domain, registered)
+			}
+		}
+		if wantV6 && cf.IPv6 && fetched.IPv6 != "" {
+			registered, err := dnsLookupAAAA(cf.Domain)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "dipper_ai check: DNS AAAA %s: %v → scheduling update\n", cf.Domain, err)
+				mismatch = true
+			} else if registered != fetched.IPv6 {
+				fmt.Fprintf(os.Stderr, "dipper_ai check: %s AAAA=%s want=%s → mismatch\n", cf.Domain, registered, fetched.IPv6)
+				mismatch = true
+			} else {
+				fmt.Fprintf(os.Stderr, "dipper_ai check: %s AAAA=%s ok\n", cf.Domain, registered)
+			}
+		}
 	}
 
+	if !mismatch {
+		fmt.Fprintln(os.Stderr, "dipper_ai check: all domains match current IP")
+		_ = checkGate.Touch()
+		return nil
+	}
+
+	// Mismatch detected: reset IP cache so Update() sees a change and pushes
+	// the correct IP to all DDNS providers immediately.
+	fmt.Fprintln(os.Stderr, "dipper_ai check: mismatch detected — forcing DDNS update")
+	st, err := state.New(cfg.StateDir)
+	if err != nil {
+		return err
+	}
+	if wantV4 && fetched.IPv4 != "" {
+		_ = st.WriteIP("ipv4", "0.0.0.0")
+	}
+	if wantV6 && fetched.IPv6 != "" {
+		_ = st.WriteIP("ipv6", "::")
+	}
+
+	updateErr := Update(cfg)
 	_ = checkGate.Touch()
-	return nil
+	return updateErr
+}
+
+// lookupARecord resolves the IPv4 A record for domain.
+func lookupARecord(domain string) (string, error) {
+	ips, err := net.LookupHost(domain)
+	if err != nil {
+		return "", err
+	}
+	for _, s := range ips {
+		if ip := net.ParseIP(s); ip != nil {
+			if v4 := ip.To4(); v4 != nil {
+				return v4.String(), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("no A record for %s", domain)
+}
+
+// lookupAAAARecord resolves the IPv6 AAAA record for domain.
+func lookupAAAARecord(domain string) (string, error) {
+	ips, err := net.LookupHost(domain)
+	if err != nil {
+		return "", err
+	}
+	for _, s := range ips {
+		if ip := net.ParseIP(s); ip != nil && ip.To4() == nil {
+			return ip.String(), nil
+		}
+	}
+	return "", fmt.Errorf("no AAAA record for %s", domain)
 }
