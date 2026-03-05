@@ -159,6 +159,75 @@ func TestCheck_DNSError_ForcesUpdate(t *testing.T) {
 	}
 }
 
+// TestCheck_PartialMismatch_OnlyAffectedDomainUpdated verifies that when only
+// one of multiple domains has a stale DNS record, only that domain has its
+// cache reset; the other domain retains its cache and is NOT re-sent to the
+// DDNS provider.
+func TestCheck_PartialMismatch_OnlyAffectedDomainUpdated(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{
+		StateDir:     dir,
+		IPv4:         true,
+		IPv4DDNS:     true,
+		UpdateTime:   1440,
+		DDNSTime:     1,
+		MyDNSIPv4URL: "http://fake.invalid/login.html",
+		MyDNS: []config.MyDNSEntry{
+			{ID: "u0", Pass: "p0", Domain: "ok.example.com", IPv4: true},    // DNS ok
+			{ID: "u1", Pass: "p1", Domain: "stale.example.com", IPv4: true}, // DNS stale
+		},
+	}
+
+	// Pre-seed both caches with the current IP so Update() only acts on
+	// the one whose cache was reset by Check().
+	st, _ := state.New(dir)
+	_ = st.WriteDomainCache("mydns_0", "ipv4", "1.2.3.4")
+	_ = st.WriteDomainCache("mydns_1", "ipv4", "1.2.3.4")
+
+	// Pre-touch gate_update so forceSync does not fire.
+	_ = os.WriteFile(dir+"/gate_update", []byte(time.Now().Format(time.RFC3339)), 0644)
+
+	origFetch := ipFetch
+	ipFetch = fakeFetchIP("1.2.3.4")
+	t.Cleanup(func() { ipFetch = origFetch })
+
+	origDNS := dnsLookupA
+	dnsLookupA = func(domain string) (string, error) {
+		if domain == "ok.example.com" {
+			return "1.2.3.4", nil // matches
+		}
+		return "0.0.0.0", nil // stale
+	}
+	t.Cleanup(func() { dnsLookupA = origDNS })
+
+	var updated []string
+	origMyDNS := mydnsUpdateIPv4
+	mydnsUpdateIPv4 = func(e ddns.MyDNSEntry, u string) ddns.ProviderResult {
+		updated = append(updated, e.Domain)
+		return ddns.ProviderResult{}
+	}
+	t.Cleanup(func() { mydnsUpdateIPv4 = origMyDNS })
+
+	if err := Check(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, d := range updated {
+		if d == "ok.example.com" {
+			t.Error("ok.example.com should NOT be updated — its DNS was already correct")
+		}
+	}
+	found := false
+	for _, d := range updated {
+		if d == "stale.example.com" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("stale.example.com SHOULD have been updated — its DNS was stale")
+	}
+}
+
 // TestUpdate_PerDomain_OnlyChangedEntry verifies that only the entry whose
 // per-domain cache differs from the current IP is updated; unchanged entries
 // are skipped even when the timer fires.

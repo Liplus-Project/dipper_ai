@@ -15,10 +15,20 @@ var (
 	dnsLookupAAAA = lookupAAAARecord
 )
 
+// domainMismatch records which address families mismatched for a single entry.
+type domainMismatch struct {
+	ipv4 bool
+	ipv6 bool
+}
+
 // Check resolves the DNS-registered IP for each configured DDNS domain and
 // compares it with the current external IP.  If any domain has a stale or
-// wrong registration, Check resets the per-domain cache and forces an
-// immediate DDNS update via Update().
+// wrong registration, Check resets the per-domain cache for only those
+// mismatched entries and forces an immediate DDNS update via Update().
+//
+// Only domains whose DNS record differs from the current IP have their cache
+// reset; domains that are already correct retain their cache so Update() does
+// not send unnecessary API requests for them.
 //
 // No internal gate: the systemd timer (every 5 min) is the effective rate
 // limit.  Running check on every tick means external DNS changes (e.g. manual
@@ -41,10 +51,13 @@ func Check(cfg *config.Config) error {
 		return fmt.Errorf("check: could not fetch current external IP")
 	}
 
+	// Per-entry mismatch tracking — only mismatched entries get cache-reset.
+	mydnsMismatch := make([]domainMismatch, len(cfg.MyDNS))
+	cfMismatch := make([]domainMismatch, len(cfg.Cloudflare))
 	mismatch := false
 
 	// --- Verify MyDNS domains ---
-	for _, m := range cfg.MyDNS {
+	for i, m := range cfg.MyDNS {
 		if m.Domain == "" {
 			continue
 		}
@@ -52,9 +65,11 @@ func Check(cfg *config.Config) error {
 			registered, err := dnsLookupA(m.Domain)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "dipper_ai check: DNS A %s: %v → scheduling update\n", m.Domain, err)
+				mydnsMismatch[i].ipv4 = true
 				mismatch = true
 			} else if registered != fetched.IPv4 {
 				fmt.Fprintf(os.Stderr, "dipper_ai check: %s A=%s want=%s → mismatch\n", m.Domain, registered, fetched.IPv4)
+				mydnsMismatch[i].ipv4 = true
 				mismatch = true
 			} else {
 				fmt.Fprintf(os.Stderr, "dipper_ai check: %s A=%s ok\n", m.Domain, registered)
@@ -64,9 +79,11 @@ func Check(cfg *config.Config) error {
 			registered, err := dnsLookupAAAA(m.Domain)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "dipper_ai check: DNS AAAA %s: %v → scheduling update\n", m.Domain, err)
+				mydnsMismatch[i].ipv6 = true
 				mismatch = true
 			} else if registered != fetched.IPv6 {
 				fmt.Fprintf(os.Stderr, "dipper_ai check: %s AAAA=%s want=%s → mismatch\n", m.Domain, registered, fetched.IPv6)
+				mydnsMismatch[i].ipv6 = true
 				mismatch = true
 			} else {
 				fmt.Fprintf(os.Stderr, "dipper_ai check: %s AAAA=%s ok\n", m.Domain, registered)
@@ -75,7 +92,7 @@ func Check(cfg *config.Config) error {
 	}
 
 	// --- Verify Cloudflare domains ---
-	for _, cf := range cfg.Cloudflare {
+	for i, cf := range cfg.Cloudflare {
 		if !cf.Enabled || cf.Domain == "" {
 			continue
 		}
@@ -83,9 +100,11 @@ func Check(cfg *config.Config) error {
 			registered, err := dnsLookupA(cf.Domain)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "dipper_ai check: DNS A %s: %v → scheduling update\n", cf.Domain, err)
+				cfMismatch[i].ipv4 = true
 				mismatch = true
 			} else if registered != fetched.IPv4 {
 				fmt.Fprintf(os.Stderr, "dipper_ai check: %s A=%s want=%s → mismatch\n", cf.Domain, registered, fetched.IPv4)
+				cfMismatch[i].ipv4 = true
 				mismatch = true
 			} else {
 				fmt.Fprintf(os.Stderr, "dipper_ai check: %s A=%s ok\n", cf.Domain, registered)
@@ -95,9 +114,11 @@ func Check(cfg *config.Config) error {
 			registered, err := dnsLookupAAAA(cf.Domain)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "dipper_ai check: DNS AAAA %s: %v → scheduling update\n", cf.Domain, err)
+				cfMismatch[i].ipv6 = true
 				mismatch = true
 			} else if registered != fetched.IPv6 {
 				fmt.Fprintf(os.Stderr, "dipper_ai check: %s AAAA=%s want=%s → mismatch\n", cf.Domain, registered, fetched.IPv6)
+				cfMismatch[i].ipv6 = true
 				mismatch = true
 			} else {
 				fmt.Fprintf(os.Stderr, "dipper_ai check: %s AAAA=%s ok\n", cf.Domain, registered)
@@ -110,20 +131,21 @@ func Check(cfg *config.Config) error {
 		return nil
 	}
 
-	// Mismatch detected: reset per-domain caches for mismatched entries so
-	// the next Update() call sees a cache miss and re-sends to those providers.
+	// Mismatch detected: reset per-domain caches for mismatched entries ONLY.
+	// Domains whose DNS record is already correct keep their cache intact so
+	// Update() does not send redundant API requests for them.
 	// Also delete gate_ddns so DDNS_TIME rate-limit does not delay the fix.
-	fmt.Fprintln(os.Stderr, "dipper_ai check: mismatch detected — forcing DDNS update")
+	fmt.Fprintln(os.Stderr, "dipper_ai check: mismatch detected — forcing DDNS update for affected domains")
 	st, err := state.New(cfg.StateDir)
 	if err != nil {
 		return err
 	}
 	for i, m := range cfg.MyDNS {
 		entryKey := fmt.Sprintf("mydns_%d", i)
-		if wantV4 && m.IPv4 && fetched.IPv4 != "" {
+		if mydnsMismatch[i].ipv4 && m.IPv4 {
 			_ = st.ResetDomainCache(entryKey, "ipv4")
 		}
-		if wantV6 && m.IPv6 && fetched.IPv6 != "" {
+		if mydnsMismatch[i].ipv6 && m.IPv6 {
 			_ = st.ResetDomainCache(entryKey, "ipv6")
 		}
 	}
@@ -132,10 +154,10 @@ func Check(cfg *config.Config) error {
 			continue
 		}
 		entryKey := fmt.Sprintf("cf_%d", i)
-		if wantV4 && cf.IPv4 && fetched.IPv4 != "" {
+		if cfMismatch[i].ipv4 && cf.IPv4 {
 			_ = st.ResetDomainCache(entryKey, "A")
 		}
-		if wantV6 && cf.IPv6 && fetched.IPv6 != "" {
+		if cfMismatch[i].ipv6 && cf.IPv6 {
 			_ = st.ResetDomainCache(entryKey, "AAAA")
 		}
 	}
