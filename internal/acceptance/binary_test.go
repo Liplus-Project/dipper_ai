@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 var binaryPath string
@@ -78,20 +77,15 @@ func TestBinary_Update_ExitZero(t *testing.T) {
 	}
 }
 
-func TestBinary_Check_GatedExitZero(t *testing.T) {
+func TestBinary_Check_NoProviders_ExitZero(t *testing.T) {
 	stateDir := t.TempDir()
-	// check uses UpdateTime as its gate duration (default 1440 min).
-	conf := writeConf(t, stateDir, "IPV4=on\n")
-
-	// Pre-seed gate_check as "just touched" so check skips without network.
-	ts := time.Now().Format(time.RFC3339)
-	if err := os.WriteFile(filepath.Join(stateDir, "gate_check"), []byte(ts), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// IPV4=off, IPV6=off (default from writeConf) — no providers configured.
+	// check should exit 0 immediately without attempting any DNS lookup.
+	conf := writeConf(t, stateDir, "")
 
 	_, _, code := runBinary(t, conf, "check")
 	if code != 0 {
-		t.Errorf("expected exit 0 for gated check, got %d", code)
+		t.Errorf("expected exit 0 for check with no providers, got %d", code)
 	}
 }
 
