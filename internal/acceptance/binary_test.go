@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 var binaryPath string
@@ -190,9 +191,15 @@ func TestBinary_Check_PartialMismatch_OnlyStaleUpdated(t *testing.T) {
 			"MYDNS_IPV4_URL="+srv.URL+"\n",
 	)
 
-	// Pre-seed the cache for ok.example.com so Update() sees no IP change for it.
-	// Without this, an empty cache would cause Update() to update all entries on first run.
+	// Pre-seed the domain cache for ok.example.com so Update() sees no IP change.
+	// Without this, an empty cache returns "0.0.0.0" and Update() would update it.
 	if err := os.WriteFile(filepath.Join(stateDir, "cache_mydns_0_ipv4"), []byte("1.2.3.4\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-touch gate_update so forceSync (MyDNS keepalive) does not fire.
+	// Without this, a missing gate file causes ShouldRun()=true regardless of UPDATE_TIME,
+	// which force-updates all MyDNS entries and defeats the per-domain cache check.
+	if err := os.WriteFile(filepath.Join(stateDir, "gate_update"), []byte(time.Now().Format(time.RFC3339)), 0644); err != nil {
 		t.Fatal(err)
 	}
 
