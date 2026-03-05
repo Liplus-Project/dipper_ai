@@ -48,7 +48,7 @@ GOOS=linux GOARCH=amd64 go build -o dipper_ai ./cmd/dipper_ai
 ## インストール
 
 `scripts/install.sh` を root で実行します。
-以下のファイルが配置され、systemd タイマーが有効化されます。
+バイナリと systemd サービスを配置し、サービスを有効化します。
 
 ```bash
 sudo bash scripts/install.sh
@@ -61,8 +61,11 @@ sudo bash scripts/install.sh
 | `dipper_ai` バイナリ | `/usr/bin/dipper_ai` |
 | 設定サンプル | `/etc/dipper_ai/user.conf.example` |
 | systemd サービス | `/etc/systemd/system/dipper_ai.service` |
-| systemd タイマー | `/etc/systemd/system/dipper_ai.timer` |
 | 状態ファイル | `/etc/dipper_ai/state/`（実行時に自動生成） |
+
+> **v1.5.0 以前からアップグレードする場合**
+> install.sh が旧タイマーユニット（`dipper_ai.timer`、`dipper_ai-keepalive.timer`）を自動的に停止・削除します。
+> 手動での削除は不要です。
 
 ### インストール後の手順
 
@@ -71,31 +74,22 @@ sudo bash scripts/install.sh
 sudo cp /etc/dipper_ai/user.conf.example /etc/dipper_ai/user.conf
 sudo vi /etc/dipper_ai/user.conf
 
-# タイマーの状態確認
-systemctl status dipper_ai.timer
+# サービス状態確認
+systemctl status dipper_ai
 
-# 手動で update を実行してテスト
+# ログ確認
+journalctl -u dipper_ai -n 30
+
+# 手動で動作確認
 sudo dipper_ai update
+sudo dipper_ai check
 ```
-
-> **`DDNS_TIME` と systemd タイマー間隔について**
->
-> `install.sh` は `user.conf` の `DDNS_TIME`（分）を読み取り、
-> `OnUnitActiveSec` を自動的に設定します。
-> 設定ファイルを編集して `DDNS_TIME` を変更した場合は、
-> タイマーに反映させるために `sudo bash scripts/install.sh` を再実行してください。
->
-> | `DDNS_TIME` | タイマー間隔 |
-> |-------------|-------------|
-> | `0`（デフォルト・無効） | 5 分（フォールバック） |
-> | `1` | 1 分 |
-> | `5` | 5 分 |
 
 ---
 
 ## アップデート
 
-新しいバージョンが出たときはリポジトリのディレクトリで以下を実行するだけです。
+新しいバージョンが出たときはリポジトリのディレクトリで以下を実行します。
 
 ```bash
 cd dipper_ai
@@ -104,13 +98,11 @@ go build -o dipper_ai ./cmd/dipper_ai
 sudo bash scripts/install.sh
 ```
 
-4 ステップの意味:
-
 | ステップ | 内容 |
 |----------|------|
 | `git pull` | 最新のソースコードを取得 |
 | `go build ...` | バイナリを再ビルド |
-| `sudo bash scripts/install.sh` | バイナリと systemd unit を上書きインストール・`DDNS_TIME` に合わせてタイマー間隔を再設定・タイマー再起動 |
+| `sudo bash scripts/install.sh` | バイナリと systemd サービスを上書きインストール・サービス再起動 |
 
 > **Note:** 設定ファイル (`/etc/dipper_ai/user.conf`) はインストールスクリプトで上書きされません。設定は引き継がれます。
 
@@ -122,7 +114,7 @@ sudo bash scripts/install.sh
 sudo bash scripts/uninstall.sh
 ```
 
-サービス・タイマーの停止と無効化、バイナリの削除を行います。
+サービスの停止・無効化とバイナリの削除を行います。
 設定ファイル (`/etc/dipper_ai/`) は保持されます。手動で削除してください。
 
 ---

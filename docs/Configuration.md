@@ -13,6 +13,18 @@ KEY="value"        # 前後のダブルクォートは自動で除去
 # コメント行       # 行頭 # は無視
 ```
 
+### 時間指定フォーマット
+
+時間に関する設定（`DDNS_TIME`、`UPDATE_TIME`、`IP_CACHE_TIME`、`ERR_CHK_TIME`）はサフィックス形式が使用できます。
+
+| 書式 | 意味 | 例 |
+|------|------|----|
+| `30s` | 秒（分に切り上げ） | `30s` → 1 分 |
+| `5m` | 分 | `5m` → 5 分 |
+| `2h` | 時間 | `2h` → 120 分 |
+| `1d` | 日 | `1d` → 1440 分 |
+| `30`（整数） | 分（後方互換） | `30` → 30 分 |
+
 ---
 
 ## STATE_DIR
@@ -50,25 +62,86 @@ IPV6_DDNS=on
 
 ---
 
-## タイムゲート（分単位）
+## タイム設定
 
-実行間隔を制御します。ゲートファイルが `STATE_DIR` に保存されます。
+### DDNS_TIME — デーモンのチェック間隔
 
-| キー | デフォルト | 最小値 | 説明 |
-|------|-----------|--------|------|
-| `UPDATE_TIME` | `1440` | 3 | 定期更新の間隔（分） |
-| `DDNS_TIME` | `1` | 1 | IP 変化後に DDNS を更新する間隔（分） |
-| `IP_CACHE_TIME` | `0` | 15（有効時） | IP キャッシュの有効期間（0 = 無効化） |
-| `ERR_CHK_TIME` | `0` | 1（有効時） | エラーメール送信の間隔（0 = 無効化） |
+| | |
+|--|--|
+| **キー** | `DDNS_TIME` |
+| **デフォルト** | `5m`（5 分） |
+| **最小値** | `1m` |
 
-- 設定値が最小値を下回る場合は自動的に最小値に切り上げられます。
-- `0` を設定すると「無効化」として扱われる（`IP_CACHE_TIME`、`ERR_CHK_TIME` のみ）。
+デーモン（`dipper_ai daemon`）が IP チェック・DDNS 更新サイクルを実行する間隔。
+`0` を指定した場合はデフォルト（5 分）が適用されます。
+
+IP 変化への応答速度を上げたい場合は短く、システムリソースを節約したい場合は長く設定します。
 
 ```conf
-UPDATE_TIME=1440    # 1日
-DDNS_TIME=1         # 1分
+DDNS_TIME=5m    # 5 分ごとにチェック
+DDNS_TIME=1m    # 1 分ごと（敏感な運用）
+DDNS_TIME=1h    # 1 時間ごと（余裕のある運用）
+```
+
+### UPDATE_TIME — keepalive 送信間隔
+
+| | |
+|--|--|
+| **キー** | `UPDATE_TIME` |
+| **デフォルト** | `1d`（1 日） |
+| **最小値** | `3m` |
+| **無効化** | `0` |
+
+DDNS サービスへの定期 keepalive 送信間隔。
+IP が変化していなくても指定間隔で強制更新し、サービスの登録失効を防ぐ。
+
+適切な値はご利用の DDNS サービスの失効期間に合わせて設定してください。
+`0` を指定すると keepalive は無効化されます（Cloudflare のみ利用の場合など）。
+
+> **`DDNS_TIME` との独立性**
+> `DDNS_TIME` と `UPDATE_TIME` はデーモン内部の独立したタイマーで管理されます。
+> `DDNS_TIME=5m`（5 分チェック）と `UPDATE_TIME=30d`（30 日 keepalive）のような
+> 任意の組み合わせが正しく動作します。
+
+```conf
+UPDATE_TIME=1d     # 1 日ごとに keepalive（MyDNS の推奨）
+UPDATE_TIME=7d     # 7 日ごと
+UPDATE_TIME=0      # keepalive 無効（Cloudflare のみ利用の場合など）
+```
+
+### IP_CACHE_TIME — IP キャッシュ有効期間
+
+| | |
+|--|--|
+| **キー** | `IP_CACHE_TIME` |
+| **デフォルト** | `0`（無効） |
+| **最小値** | `15m`（有効時） |
+| **無効化** | `0` |
+
+グローバル IP の取得結果をキャッシュする期間。
+`0` のとき（デフォルト）は毎回外部 API に問い合わせます。
+`DDNS_TIME` が短い場合にキャッシュを設定すると外部 API への負荷を軽減できます。
+
+```conf
 IP_CACHE_TIME=0     # キャッシュなし（毎回取得）
-ERR_CHK_TIME=0      # エラーメール無効
+IP_CACHE_TIME=15m   # 15 分キャッシュ
+```
+
+### ERR_CHK_TIME — エラーメール送信間隔
+
+| | |
+|--|--|
+| **キー** | `ERR_CHK_TIME` |
+| **デフォルト** | `0`（無効） |
+| **最小値** | `1m`（有効時） |
+| **無効化** | `0` |
+
+エラーログの確認・通知メール送信の最小間隔。
+`0` のとき（デフォルト）はチェックのたびに確認します（推奨: `EMAIL_ADR` が設定されている場合は適切な値を設定する）。
+
+```conf
+ERR_CHK_TIME=0      # 無効（毎サイクル確認）
+ERR_CHK_TIME=1h     # 1 時間ごとに確認
 ```
 
 ---
@@ -83,7 +156,7 @@ ERR_CHK_TIME=0      # エラーメール無効
 |------|----|------|-----------|------|
 | `MYDNS_N_ID` | string | ✓ | — | MyDNS マスター ID（省略するとそのエントリを終端とみなす） |
 | `MYDNS_N_PASS` | string | ✓ | — | MyDNS パスワード |
-| `MYDNS_N_DOMAIN` | string | | `""` | ドメイン名（現在はログ用途のみ） |
+| `MYDNS_N_DOMAIN` | string | | `""` | ドメイン名（ログ識別用） |
 | `MYDNS_N_IPV4` | bool | | `on` | このエントリで IPv4 を更新する |
 | `MYDNS_N_IPV6` | bool | | `off` | このエントリで IPv6 を更新する |
 
@@ -115,7 +188,8 @@ MYDNS_1_IPV6=on
 ## Cloudflare
 
 Cloudflare DNS への更新設定。エントリは `CF_0_*`、`CF_1_*` ... と増やせます。
-ゾーン名からゾーン ID を自動解決します（ゾーン ID を直接書く必要はありません）。
+ゾーン名からゾーン ID を自動解決します。
+Cloudflare は API 登録が失効しないため、keepalive（`UPDATE_TIME`）の対象外です。
 
 ### エントリキー（`N` = 0, 1, 2, ...）
 
@@ -150,13 +224,12 @@ CF_0_IPV6=off
 ## メール通知
 
 エラーが蓄積された場合に `sendmail` 経由で通知します。
-`EMAIL_CHK_DDNS` または `EMAIL_UP_DDNS` を `on` にする場合、`EMAIL_ADR` は必須です。
 
 | キー | 型 | デフォルト | 説明 |
 |------|----|-----------|------|
-| `EMAIL_CHK_DDNS` | bool | `off` | IP 変化時に通知 |
-| `EMAIL_UP_DDNS` | bool | `off` | 定期更新時に通知 |
-| `EMAIL_ADR` | string | `""` | 通知先メールアドレス |
+| `EMAIL_CHK_DDNS` | bool | `off` | IP 変化時に通知（`update` コマンドが送信） |
+| `EMAIL_UP_DDNS` | bool | `off` | keepalive 送信時に通知（`keepalive` コマンドが送信） |
+| `EMAIL_ADR` | string | `""` | 通知先メールアドレス（`EMAIL_CHK_DDNS` / `EMAIL_UP_DDNS` を使う場合は必須） |
 
 ```conf
 EMAIL_CHK_DDNS=on
@@ -165,3 +238,46 @@ EMAIL_ADR=admin@example.com
 ```
 
 > **Note:** メール送信は `sendmail` コマンドに依存します。事前にメール送信環境を構築してください。
+
+---
+
+## 設定例（最小構成・MyDNS のみ）
+
+```conf
+# --- IP ---
+IPV4=on
+IPV6=off
+
+# --- タイム ---
+DDNS_TIME=5m        # 5 分ごとに IP チェック
+UPDATE_TIME=1d      # 1 日ごとに MyDNS keepalive
+
+# --- MyDNS ---
+MYDNS_0_ID=mydns123456
+MYDNS_0_PASS=yourpassword
+MYDNS_0_DOMAIN=home.example.com
+```
+
+## 設定例（MyDNS + Cloudflare 併用）
+
+```conf
+# --- IP ---
+IPV4=on
+IPV6=off
+
+# --- タイム ---
+DDNS_TIME=5m
+UPDATE_TIME=1d      # MyDNS のみ keepalive、Cloudflare は不要
+
+# --- MyDNS ---
+MYDNS_0_ID=mydns123456
+MYDNS_0_PASS=yourpassword
+MYDNS_0_DOMAIN=home.example.com
+
+# --- Cloudflare ---
+CF_0_ENABLED=on
+CF_0_API=your_cf_api_token
+CF_0_ZONE=example.com
+CF_0_DOMAIN=sub.example.com
+CF_0_IPV4=on
+```
