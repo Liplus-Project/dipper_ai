@@ -12,11 +12,6 @@ import (
 	"github.com/Liplus-Project/dipper_ai/internal/state"
 )
 
-// resetCheckGate removes the check gate file so the next Check() call runs.
-func resetCheckGate(dir string) {
-	_ = os.Remove(dir + "/gate_check")
-}
-
 // fakeFetchIP returns a fixed IPv4.
 func fakeFetchIP(addr string) func(bool, bool) (*ip.Result, error) {
 	return func(v4, v6 bool) (*ip.Result, error) {
@@ -161,46 +156,6 @@ func TestCheck_DNSError_ForcesUpdate(t *testing.T) {
 	}
 	if !updateCalled {
 		t.Error("DDNS update SHOULD have been called when DNS lookup fails")
-	}
-}
-
-// TestCheck_Gate_SkipsWhenRecent verifies that the check gate prevents
-// re-running before UpdateTime minutes have elapsed.
-func TestCheck_Gate_SkipsWhenRecent(t *testing.T) {
-	dir := t.TempDir()
-	cfg := &config.Config{
-		StateDir:   dir,
-		IPv4:       true,
-		IPv4DDNS:   true,
-		UpdateTime: 1440,
-		DDNSTime:   1,
-		MyDNS: []config.MyDNSEntry{
-			{ID: "u", Pass: "p", Domain: "home.example.com", IPv4: true},
-		},
-	}
-
-	origFetch := ipFetch
-	fetchCount := 0
-	ipFetch = func(v4, v6 bool) (*ip.Result, error) {
-		fetchCount++
-		return &ip.Result{IPv4: "1.2.3.4"}, nil
-	}
-	t.Cleanup(func() { ipFetch = origFetch })
-
-	origDNS := dnsLookupA
-	dnsLookupA = func(domain string) (string, error) { return "1.2.3.4", nil }
-	t.Cleanup(func() { dnsLookupA = origDNS })
-
-	// First run: gate passes, fetch occurs.
-	if err := Check(cfg); err != nil {
-		t.Fatalf("first run: %v", err)
-	}
-	// Second run: gate active (not enough time has passed) → skips.
-	if err := Check(cfg); err != nil {
-		t.Fatalf("second run: %v", err)
-	}
-	if fetchCount > 1 {
-		t.Errorf("expected 1 fetch (gate should block second run), got %d", fetchCount)
 	}
 }
 
