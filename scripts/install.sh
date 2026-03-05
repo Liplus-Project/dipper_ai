@@ -34,57 +34,20 @@ if [[ ! -f "$CONF_DIR/user.conf" ]]; then
   fi
 fi
 
-# --- Determine DDNS_TIME for systemd timer interval ---
-# Read DDNS_TIME from user.conf and convert to minutes.
-# Supported formats: 5m, 2h, 1d, 30s, or plain integer (minutes).
-# Priority: /etc/dipper_ai/user.conf > ./user.conf > default (5 min).
-# DDNS_TIME=0 means "no rate-limit gate" — fall back to 5-minute default.
-
-parse_duration_min() {
-  local v="$1"
-  if   [[ "$v" =~ ^([0-9]+)d$ ]]; then echo $(( ${BASH_REMATCH[1]} * 1440 ))
-  elif [[ "$v" =~ ^([0-9]+)h$ ]]; then echo $(( ${BASH_REMATCH[1]} * 60 ))
-  elif [[ "$v" =~ ^([0-9]+)m$ ]]; then echo "${BASH_REMATCH[1]}"
-  elif [[ "$v" =~ ^([0-9]+)s$ ]]; then
-    local sec="${BASH_REMATCH[1]}"
-    echo $(( (sec + 59) / 60 ))   # round up to nearest minute
-  elif [[ "$v" =~ ^[0-9]+$ ]];    then echo "$v"  # plain integer = minutes
-  else echo "5"                                    # unrecognised → default
-  fi
-}
-
-DDNS_TIME_MIN=5
-for conf_candidate in "$CONF_DIR/user.conf" "./user.conf"; do
-  if [[ -f "$conf_candidate" ]]; then
-    v=$(grep -E '^DDNS_TIME=' "$conf_candidate" 2>/dev/null | tail -1 | cut -d= -f2 | sed 's/[[:space:]#].*//')
-    parsed=$(parse_duration_min "$v")
-    if [[ "$parsed" =~ ^[1-9][0-9]*$ ]]; then
-      DDNS_TIME_MIN="$parsed"
-    fi
-    break
+# Remove old timer-based units if present (upgrade from pre-daemon versions).
+for old_unit in dipper_ai.timer dipper_ai-keepalive.service dipper_ai-keepalive.timer; do
+  if [[ -f "$SYSTEMD_DIR/$old_unit" ]]; then
+    systemctl disable --now "$old_unit" 2>/dev/null || true
+    rm -f "$SYSTEMD_DIR/$old_unit"
+    echo "  -> Removed legacy unit: $old_unit"
   fi
 done
 
-echo "Installing systemd units (DDNS_TIME=${DDNS_TIME_MIN}min)..."
+echo "Installing systemd service..."
 install -m 0644 ./systemd/dipper_ai.service "$SYSTEMD_DIR/"
 
-# Generate the timer with the interval derived from DDNS_TIME.
-# OnBootSec=2min gives the system a short warm-up period after boot.
-cat > "$SYSTEMD_DIR/dipper_ai.timer" <<EOF
-[Unit]
-Description=dipper_ai DDNS manager timer
-
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=${DDNS_TIME_MIN}min
-Unit=dipper_ai.service
-
-[Install]
-WantedBy=timers.target
-EOF
-
 systemctl daemon-reload
-systemctl enable --now dipper_ai.timer
+systemctl enable --now dipper_ai
 
 echo "dipper_ai installed successfully."
-echo "Status: $(systemctl is-active dipper_ai.timer)"
+echo "Status: $(systemctl is-active dipper_ai)"
