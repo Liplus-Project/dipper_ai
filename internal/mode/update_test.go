@@ -3,6 +3,7 @@ package mode
 import (
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/Liplus-Project/dipper_ai/internal/config"
@@ -269,5 +270,129 @@ func TestUpdate_PerEntryIPv4IPv6(t *testing.T) {
 		if c == "ipv6:a.example.com" {
 			t.Error("IPv6 should be skipped for a.example.com (IPv6=false)")
 		}
+	}
+}
+
+// captureMailCalls replaces sendMailFn for the duration of a test.
+// Returns a pointer to a slice of recorded "to|subject|body" strings.
+func captureMailCalls(t *testing.T) *[]string {
+	t.Helper()
+	sent := &[]string{}
+	orig := sendMailFn
+	sendMailFn = func(to, subject, body string) error {
+		*sent = append(*sent, to+"|"+subject+"|"+body)
+		return nil
+	}
+	t.Cleanup(func() { sendMailFn = orig })
+	return sent
+}
+
+// TestUpdate_Mail_IPChanged verifies that when EMAIL_CHK_DDNS is on and the IP
+// changes, a mail notification is sent containing the new IP and provider list.
+func TestUpdate_Mail_IPChanged(t *testing.T) {
+	cfg := baseCfg(t)
+	cfg.EmailAddr = "test@example.com"
+	cfg.EmailChkDDNS = true
+	cfg.MyDNS = []config.MyDNSEntry{{ID: "id0", Pass: "pass0", Domain: "home.example.com", IPv4: true}}
+
+	overrideFetch(t, fakeFetch("1.2.3.4", ""))
+	captureMyDNSCalls(t)
+	sent := captureMailCalls(t)
+
+	if err := Update(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(*sent) == 0 {
+		t.Fatal("expected mail to be sent on IP change")
+	}
+	mail := (*sent)[0]
+	if !strings.Contains(mail, "1.2.3.4") {
+		t.Errorf("mail body should contain new IPv4, got: %s", mail)
+	}
+	if !strings.Contains(mail, "IP changed") {
+		t.Errorf("mail body should contain reason 'IP changed', got: %s", mail)
+	}
+	if !strings.Contains(mail, "home.example.com") {
+		t.Errorf("mail body should contain domain, got: %s", mail)
+	}
+}
+
+// TestUpdate_Mail_Keepalive verifies that EMAIL_UP_DDNS triggers mail on
+// keepalive updates (IP unchanged, DDNS_TIME elapsed), not on IP-change runs.
+func TestUpdate_Mail_Keepalive(t *testing.T) {
+	cfg := baseCfg(t)
+	cfg.EmailAddr = "test@example.com"
+	cfg.EmailUpDDNS = true // notify on keepalive only
+	cfg.EmailChkDDNS = false
+	cfg.MyDNS = []config.MyDNSEntry{{ID: "id0", Pass: "pass0", Domain: "home.example.com", IPv4: true}}
+
+	overrideFetch(t, fakeFetch("1.2.3.4", ""))
+	captureMyDNSCalls(t)
+	sent := captureMailCalls(t)
+
+	// First run: IP changed (0.0.0.0 → 1.2.3.4) → EMAIL_CHK_DDNS=false → no mail.
+	if err := Update(cfg); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if len(*sent) != 0 {
+		t.Errorf("no mail expected on IP-change run when EMAIL_CHK_DDNS=false, got %d", len(*sent))
+	}
+
+	// Simulate DDNS_TIME elapsed.
+	_ = os.Remove(cfg.StateDir + "/gate_ddns")
+
+	// Second run: same IP, keepalive → EMAIL_UP_DDNS=true → mail expected.
+	if err := Update(cfg); err != nil {
+		t.Fatalf("keepalive run: %v", err)
+	}
+	if len(*sent) == 0 {
+		t.Error("expected mail on keepalive run when EMAIL_UP_DDNS=true")
+	} else {
+		mail := (*sent)[0]
+		if !strings.Contains(mail, "DDNS keepalive") {
+			t.Errorf("mail body should contain reason 'DDNS keepalive', got: %s", mail)
+		}
+	}
+}
+
+// TestUpdate_Mail_BothOff verifies that no mail is sent when both
+// EMAIL_CHK_DDNS and EMAIL_UP_DDNS are false.
+func TestUpdate_Mail_BothOff(t *testing.T) {
+	cfg := baseCfg(t)
+	cfg.EmailAddr = "test@example.com"
+	cfg.EmailChkDDNS = false
+	cfg.EmailUpDDNS = false
+	cfg.MyDNS = []config.MyDNSEntry{{ID: "id0", Pass: "pass0", Domain: "home.example.com", IPv4: true}}
+
+	overrideFetch(t, fakeFetch("1.2.3.4", ""))
+	captureMyDNSCalls(t)
+	sent := captureMailCalls(t)
+
+	if err := Update(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(*sent) != 0 {
+		t.Errorf("expected no mail when both flags off, got %d", len(*sent))
+	}
+}
+
+// TestUpdate_Mail_FailureIsNonFatal verifies that a mail-send failure does not
+// cause Update() to return an error (DDNS update itself succeeded).
+func TestUpdate_Mail_FailureIsNonFatal(t *testing.T) {
+	cfg := baseCfg(t)
+	cfg.EmailAddr = "test@example.com"
+	cfg.EmailChkDDNS = true
+	cfg.MyDNS = []config.MyDNSEntry{{ID: "id0", Pass: "pass0", Domain: "home.example.com", IPv4: true}}
+
+	overrideFetch(t, fakeFetch("1.2.3.4", ""))
+	captureMyDNSCalls(t)
+
+	orig := sendMailFn
+	sendMailFn = func(_, _, _ string) error { return errors.New("sendmail: connection refused") }
+	t.Cleanup(func() { sendMailFn = orig })
+
+	if err := Update(cfg); err != nil {
+		t.Errorf("mail failure should be non-fatal, got error: %v", err)
 	}
 }

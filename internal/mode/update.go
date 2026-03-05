@@ -4,6 +4,7 @@ package mode
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Liplus-Project/dipper_ai/internal/config"
@@ -108,6 +109,7 @@ func Update(cfg *config.Config) error {
 	}
 
 	var updateErr error
+	var successLines []string // successful provider lines for mail notification
 
 	// --- MyDNS per-entry updates ---
 	for i, entry := range cfg.MyDNS {
@@ -127,6 +129,7 @@ func Update(cfg *config.Config) error {
 			} else {
 				_ = st.WriteDDNSResult(key, "ok")
 				fmt.Fprintf(os.Stderr, "dipper_ai update: mydns[%d] %s ipv4: ok\n", i, entry.Domain)
+				successLines = append(successLines, fmt.Sprintf("  mydns[%d] %s ipv4: ok", i, entry.Domain))
 			}
 		}
 		if wantV6 && entry.IPv6 && fetched.IPv6 != "" {
@@ -140,6 +143,7 @@ func Update(cfg *config.Config) error {
 			} else {
 				_ = st.WriteDDNSResult(key, "ok")
 				fmt.Fprintf(os.Stderr, "dipper_ai update: mydns[%d] %s ipv6: ok\n", i, entry.Domain)
+				successLines = append(successLines, fmt.Sprintf("  mydns[%d] %s ipv6: ok", i, entry.Domain))
 			}
 		}
 	}
@@ -166,6 +170,7 @@ func Update(cfg *config.Config) error {
 			} else {
 				_ = st.WriteDDNSResult(key, "ok")
 				fmt.Fprintf(os.Stderr, "dipper_ai update: cf[%d] %s A: ok\n", i, cf.Domain)
+				successLines = append(successLines, fmt.Sprintf("  cf[%d] %s A: ok", i, cf.Domain))
 			}
 		}
 		if wantV6 && cf.IPv6 && fetched.IPv6 != "" {
@@ -179,10 +184,49 @@ func Update(cfg *config.Config) error {
 			} else {
 				_ = st.WriteDDNSResult(key, "ok")
 				fmt.Fprintf(os.Stderr, "dipper_ai update: cf[%d] %s AAAA: ok\n", i, cf.Domain)
+				successLines = append(successLines, fmt.Sprintf("  cf[%d] %s AAAA: ok", i, cf.Domain))
 			}
 		}
 	}
 
 	_ = ddnsGate.Touch()
+
+	// --- Email notification ---
+	// Send only when the relevant flag is set and at least one provider succeeded.
+	wantMail := cfg.EmailAddr != "" && len(successLines) > 0 &&
+		((ipChanged && cfg.EmailChkDDNS) || (!ipChanged && cfg.EmailUpDDNS))
+	if wantMail {
+		if mailErr := sendUpdateNotification(cfg, fetched, ipChanged, successLines); mailErr != nil {
+			_ = st.AppendError(fmt.Sprintf("update_mail_failed: %v", mailErr))
+			fmt.Fprintf(os.Stderr, "dipper_ai update: mail notification failed: %v\n", mailErr)
+			// Mail failure is non-fatal; do not override updateErr.
+		}
+	}
+
 	return updateErr
+}
+
+// sendUpdateNotification composes and sends an IP-update notification email.
+func sendUpdateNotification(cfg *config.Config, fetched *ip.Result, ipChanged bool, successLines []string) error {
+	reason := "DDNS keepalive"
+	if ipChanged {
+		reason = "IP changed"
+	}
+
+	var ipLines []string
+	if fetched.IPv4 != "" {
+		ipLines = append(ipLines, "IPv4: "+fetched.IPv4)
+	}
+	if fetched.IPv6 != "" {
+		ipLines = append(ipLines, "IPv6: "+fetched.IPv6)
+	}
+
+	subject := "dipper_ai: IP updated"
+	body := fmt.Sprintf("%s\n\nReason: %s\n\nUpdated providers:\n%s\n",
+		strings.Join(ipLines, "\n"),
+		reason,
+		strings.Join(successLines, "\n"),
+	)
+
+	return sendMailFn(cfg.EmailAddr, subject, body)
 }
