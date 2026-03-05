@@ -34,11 +34,10 @@ if [[ ! -f "$CONF_DIR/user.conf" ]]; then
   fi
 fi
 
-# --- Determine DDNS_TIME for systemd timer interval ---
-# Read DDNS_TIME from user.conf and convert to minutes.
+# --- Parse time config values from user.conf ---
 # Supported formats: 5m, 2h, 1d, 30s, or plain integer (minutes).
-# Priority: /etc/dipper_ai/user.conf > ./user.conf > default (5 min).
-# DDNS_TIME=0 means "no rate-limit gate" — fall back to 5-minute default.
+# Priority: /etc/dipper_ai/user.conf > ./user.conf > default.
+# Returns 0 for unrecognised values.
 
 parse_duration_min() {
   local v="$1"
@@ -49,26 +48,44 @@ parse_duration_min() {
     local sec="${BASH_REMATCH[1]}"
     echo $(( (sec + 59) / 60 ))   # round up to nearest minute
   elif [[ "$v" =~ ^[0-9]+$ ]];    then echo "$v"  # plain integer = minutes
-  else echo "5"                                    # unrecognised → default
+  else echo "0"                                    # unrecognised → 0
   fi
 }
 
-DDNS_TIME_MIN=5
-for conf_candidate in "$CONF_DIR/user.conf" "./user.conf"; do
-  if [[ -f "$conf_candidate" ]]; then
-    v=$(grep -E '^DDNS_TIME=' "$conf_candidate" 2>/dev/null | tail -1 | cut -d= -f2 | sed 's/[[:space:]#].*//')
-    parsed=$(parse_duration_min "$v")
-    if [[ "$parsed" =~ ^[1-9][0-9]*$ ]]; then
-      DDNS_TIME_MIN="$parsed"
+read_conf_value() {
+  local key="$1"
+  local val=""
+  for conf_candidate in "$CONF_DIR/user.conf" "./user.conf"; do
+    if [[ -f "$conf_candidate" ]]; then
+      val=$(grep -E "^${key}=" "$conf_candidate" 2>/dev/null | tail -1 | cut -d= -f2 | sed 's/[[:space:]#].*//')
+      break
     fi
-    break
-  fi
-done
+  done
+  echo "$val"
+}
 
-echo "Installing systemd units (DDNS_TIME=${DDNS_TIME_MIN}min)..."
+# --- DDNS_TIME: check/update timer interval (default 5 min) ---
+DDNS_TIME_MIN=5
+_v=$(read_conf_value "DDNS_TIME")
+_parsed=$(parse_duration_min "$_v")
+if [[ "$_parsed" =~ ^[1-9][0-9]*$ ]]; then
+  DDNS_TIME_MIN="$_parsed"
+fi
+
+# --- UPDATE_TIME: keepalive timer interval (default 1440 min = 1 day) ---
+# UPDATE_TIME=0 means keepalive is disabled — no keepalive timer is installed.
+UPDATE_TIME_MIN=1440
+_v=$(read_conf_value "UPDATE_TIME")
+_parsed=$(parse_duration_min "$_v")
+if [[ "$_parsed" =~ ^[0-9]+$ ]]; then
+  UPDATE_TIME_MIN="$_parsed"
+fi
+
+echo "Installing systemd units (DDNS_TIME=${DDNS_TIME_MIN}min, UPDATE_TIME=${UPDATE_TIME_MIN}min)..."
 install -m 0644 ./systemd/dipper_ai.service "$SYSTEMD_DIR/"
+install -m 0644 ./systemd/dipper_ai-keepalive.service "$SYSTEMD_DIR/"
 
-# Generate the timer with the interval derived from DDNS_TIME.
+# --- Check/update timer (DDNS_TIME interval) ---
 # OnBootSec=2min gives the system a short warm-up period after boot.
 cat > "$SYSTEMD_DIR/dipper_ai.timer" <<EOF
 [Unit]
@@ -83,8 +100,34 @@ Unit=dipper_ai.service
 WantedBy=timers.target
 EOF
 
+# --- Keepalive timer (UPDATE_TIME interval) ---
+# Omitted entirely when UPDATE_TIME=0 (keepalive disabled).
+if [[ "$UPDATE_TIME_MIN" =~ ^[1-9][0-9]*$ ]]; then
+  cat > "$SYSTEMD_DIR/dipper_ai-keepalive.timer" <<EOF
+[Unit]
+Description=dipper_ai DDNS keepalive timer
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=${UPDATE_TIME_MIN}min
+Unit=dipper_ai-keepalive.service
+
+[Install]
+WantedBy=timers.target
+EOF
+  systemctl enable --now dipper_ai-keepalive.timer
+else
+  # Disable keepalive timer if it was previously installed.
+  systemctl disable --now dipper_ai-keepalive.timer 2>/dev/null || true
+fi
+
 systemctl daemon-reload
 systemctl enable --now dipper_ai.timer
 
 echo "dipper_ai installed successfully."
-echo "Status: $(systemctl is-active dipper_ai.timer)"
+echo "Check timer:     $(systemctl is-active dipper_ai.timer)"
+if [[ "$UPDATE_TIME_MIN" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Keepalive timer: $(systemctl is-active dipper_ai-keepalive.timer)"
+else
+  echo "Keepalive timer: disabled (UPDATE_TIME=0)"
+fi

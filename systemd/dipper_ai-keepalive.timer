@@ -1,0 +1,10 @@
+[Unit]
+Description=dipper_ai DDNS keepalive timer
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1440min
+Unit=dipper_ai-keepalive.service
+
+[Install]
+WantedBy=timers.target

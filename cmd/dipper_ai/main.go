@@ -14,6 +14,7 @@ const usage = `Usage: dipper_ai <command>
 Commands:
   update    Fetch IP, update DDNS if changed
   check     Check current IP and DDNS status
+  keepalive Force-update all DDNS providers (MyDNS keepalive)
   err_mail  Aggregate errors and send notification if threshold met
 `
 
@@ -44,6 +45,8 @@ func main() {
 		runErr = mode.Update(cfg)
 	case "check":
 		runErr = mode.Check(cfg)
+	case "keepalive":
+		runErr = mode.Keepalive(cfg)
 	case "err_mail":
 		runErr = mode.ErrMail(cfg)
 	default:

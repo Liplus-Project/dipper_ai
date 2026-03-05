@@ -30,9 +30,8 @@ var (
 //   - Per-domain IP cache: each provider entry independently tracks the last
 //     IP it was sent. Only entries whose cached IP differs from the current
 //     IP are updated ("changed domains only").
-//   - MyDNS keepalive: when UPDATE_TIME has elapsed, all MyDNS entries are
-//     force-updated regardless of IP change. MyDNS registrations expire if
-//     not refreshed periodically.
+//   - Keepalive is NOT handled here — it is a separate `keepalive` command
+//     triggered by its own systemd timer (dipper_ai-keepalive.timer).
 //   - Cloudflare: no keepalive — API records persist until explicitly changed.
 //   - DDNS_TIME: outer rate-limit gate. When set (>0), the entire check+update
 //     process runs at most once per DDNS_TIME minutes (except when bypassed by
@@ -73,17 +72,10 @@ func Update(cfg *config.Config) error {
 		return fetched.ErrIPv6
 	}
 
-	// --- UPDATE_TIME gate: MyDNS keepalive ---
-	// When elapsed, all MyDNS entries are force-updated regardless of IP change.
-	// Cloudflare is excluded — its records persist without periodic refresh.
-	updateGate := timegate.New(cfg.StateDir, "update", time.Duration(cfg.UpdateTime)*time.Minute)
-	forceSync := updateGate.ShouldRun()
-
 	var updateErr error
 	var successLines []string
 	anyUpdate := false
-	anyIPChange := false  // at least one domain updated due to IP change
-	anyKeepAlive := false // at least one MyDNS domain updated due to keepalive
+	anyIPChange := false // at least one domain updated due to IP change
 
 	// --- MyDNS per-entry updates ---
 	// Each entry is updated independently based on its own per-domain cache.
@@ -97,8 +89,7 @@ func Update(cfg *config.Config) error {
 
 		if wantV4 && entry.IPv4 && fetched.IPv4 != "" {
 			cached, _ := st.ReadDomainCache(entryKey, "ipv4")
-			ipDiffers := fetched.IPv4 != cached
-			if ipDiffers || forceSync {
+			if fetched.IPv4 != cached {
 				r := mydnsUpdateIPv4(dnsEntry, cfg.MyDNSIPv4URL)
 				if r.Err != nil {
 					_ = st.WriteDDNSResult(entryKey+"_ipv4", "fail:"+r.Err.Error())
@@ -110,19 +101,14 @@ func Update(cfg *config.Config) error {
 					_ = st.WriteDDNSResult(entryKey+"_ipv4", "ok")
 					successLines = append(successLines, fmt.Sprintf(" mydns[%d] %s ipv4: ok", i, entry.Domain))
 					anyUpdate = true
-					if ipDiffers {
-						anyIPChange = true
-					} else {
-						anyKeepAlive = true
-					}
+					anyIPChange = true
 				}
 			}
 		}
 
 		if wantV6 && entry.IPv6 && fetched.IPv6 != "" {
 			cached, _ := st.ReadDomainCache(entryKey, "ipv6")
-			ipDiffers := fetched.IPv6 != cached
-			if ipDiffers || forceSync {
+			if fetched.IPv6 != cached {
 				r := mydnsUpdateIPv6(dnsEntry, cfg.MyDNSIPv6URL)
 				if r.Err != nil {
 					_ = st.WriteDDNSResult(entryKey+"_ipv6", "fail:"+r.Err.Error())
@@ -134,11 +120,7 @@ func Update(cfg *config.Config) error {
 					_ = st.WriteDDNSResult(entryKey+"_ipv6", "ok")
 					successLines = append(successLines, fmt.Sprintf(" mydns[%d] %s ipv6: ok", i, entry.Domain))
 					anyUpdate = true
-					if ipDiffers {
-						anyIPChange = true
-					} else {
-						anyKeepAlive = true
-					}
+					anyIPChange = true
 				}
 			}
 		}
@@ -214,19 +196,12 @@ func Update(cfg *config.Config) error {
 	if ddnsGate != nil {
 		_ = ddnsGate.Touch()
 	}
-	if forceSync {
-		_ = updateGate.Touch()
-	}
 
 	// --- Email notification ---
-	if cfg.EmailAddr != "" && len(successLines) > 0 {
-		wantMail := (anyIPChange && cfg.EmailChkDDNS) || (anyKeepAlive && cfg.EmailUpDDNS)
-		if wantMail {
-			// Use anyIPChange as the "reason" flag for the mail body.
-			if mailErr := sendUpdateNotification(cfg, fetched, anyIPChange, successLines); mailErr != nil {
-				_ = st.AppendError(fmt.Sprintf("update_mail_failed: %v", mailErr))
-				fmt.Fprintf(os.Stderr, "dipper_ai update: mail notification failed: %v\n", mailErr)
-			}
+	if cfg.EmailAddr != "" && anyIPChange && cfg.EmailChkDDNS {
+		if mailErr := sendUpdateNotification(cfg, fetched, true, successLines); mailErr != nil {
+			_ = st.AppendError(fmt.Sprintf("update_mail_failed: %v", mailErr))
+			fmt.Fprintf(os.Stderr, "dipper_ai update: mail notification failed: %v\n", mailErr)
 		}
 	}
 

@@ -1,0 +1,12 @@
+[Unit]
+Description=dipper_ai DDNS keepalive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/etc/dipper_ai
+ExecStart=/usr/bin/dipper_ai keepalive
+
+[Install]
+WantedBy=multi-user.target

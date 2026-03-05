@@ -2,7 +2,6 @@ package mode
 
 import (
 	"errors"
-	"os"
 	"strings"
 	"testing"
 
@@ -177,51 +176,10 @@ func TestUpdate_IPv6FetchFail_IPv4Proceeds(t *testing.T) {
 	}
 }
 
-// TestUpdate_Keepalive verifies that when UPDATE_TIME elapses, all MyDNS entries
-// are force-updated even when the IP has not changed (MyDNS keepalive).
-func TestUpdate_Keepalive(t *testing.T) {
+// TestUpdate_CloudflareNoRepeatUpdate verifies that Cloudflare entries are NOT
+// updated on subsequent runs when the IP has not changed.
+func TestUpdate_CloudflareNoRepeatUpdate(t *testing.T) {
 	cfg := baseCfg(t)
-	// DDNSTime=0: no rate limit. UpdateTime=1: keepalive gate interval.
-	cfg.UpdateTime = 1
-	cfg.MyDNS = []config.MyDNSEntry{{ID: "id0", Pass: "pass0", Domain: "home.example.com", IPv4: true}}
-
-	overrideFetch(t, fakeFetch("1.2.3.4", ""))
-	calls := captureMyDNSCalls(t)
-
-	// First run — per-domain cache empty (0.0.0.0) → IP changed → DDNS called, gate_update touched.
-	if err := Update(cfg); err != nil {
-		t.Fatalf("first run: %v", err)
-	}
-	after1 := len(*calls)
-	if after1 == 0 {
-		t.Fatal("expected DDNS call on first run")
-	}
-
-	// Second run — same IP, gate_update still active → no forceSync → skip.
-	if err := Update(cfg); err != nil {
-		t.Fatalf("second run: %v", err)
-	}
-	if len(*calls) != after1 {
-		t.Errorf("expected no DDNS call when IP unchanged and UPDATE_TIME gate active")
-	}
-
-	// Remove gate_update to simulate UPDATE_TIME elapsed.
-	_ = os.Remove(cfg.StateDir + "/gate_update")
-
-	// Third run — same IP, but UPDATE_TIME elapsed → forceSync → MyDNS must fire.
-	if err := Update(cfg); err != nil {
-		t.Fatalf("keepalive run: %v", err)
-	}
-	if len(*calls) <= after1 {
-		t.Errorf("expected keepalive DDNS call when UPDATE_TIME elapsed (IP unchanged)")
-	}
-}
-
-// TestUpdate_CloudflareNoKeepalive verifies that Cloudflare entries are NOT
-// updated on UPDATE_TIME keepalive — only on IP change.
-func TestUpdate_CloudflareNoKeepalive(t *testing.T) {
-	cfg := baseCfg(t)
-	cfg.UpdateTime = 1
 	cfCalls := &[]string{}
 	origCF := cloudflareUpdate
 	cloudflareUpdate = func(e ddns.CloudflareEntry, ip, recType, url string) ddns.ProviderResult {
@@ -245,15 +203,12 @@ func TestUpdate_CloudflareNoKeepalive(t *testing.T) {
 		t.Fatal("expected CF call on first run (IP changed)")
 	}
 
-	// Remove gate_update to simulate UPDATE_TIME elapsed.
-	_ = os.Remove(cfg.StateDir + "/gate_update")
-
-	// Second run: same IP, UPDATE_TIME elapsed → forceSync → MyDNS fires but CF must NOT.
+	// Second run: same IP → no cache diff → CF must NOT be called again.
 	if err := Update(cfg); err != nil {
-		t.Fatalf("keepalive run: %v", err)
+		t.Fatalf("second run: %v", err)
 	}
 	if len(*cfCalls) != after1 {
-		t.Errorf("Cloudflare must NOT be updated on keepalive (forceSync); got %d extra calls", len(*cfCalls)-after1)
+		t.Errorf("Cloudflare must NOT be updated when IP unchanged; got %d extra calls", len(*cfCalls)-after1)
 	}
 }
 
@@ -357,45 +312,6 @@ func TestUpdate_Mail_IPChanged(t *testing.T) {
 	}
 	if !strings.Contains(mail, "home.example.com") {
 		t.Errorf("mail body should contain domain, got: %s", mail)
-	}
-}
-
-// TestUpdate_Mail_Keepalive verifies that EMAIL_UP_DDNS triggers mail on
-// keepalive updates (IP unchanged, DDNS_TIME elapsed), not on IP-change runs.
-func TestUpdate_Mail_Keepalive(t *testing.T) {
-	cfg := baseCfg(t)
-	cfg.UpdateTime = 1 // keepalive gate interval
-	cfg.EmailAddr = "test@example.com"
-	cfg.EmailUpDDNS = true // notify on keepalive only
-	cfg.EmailChkDDNS = false
-	cfg.MyDNS = []config.MyDNSEntry{{ID: "id0", Pass: "pass0", Domain: "home.example.com", IPv4: true}}
-
-	overrideFetch(t, fakeFetch("1.2.3.4", ""))
-	captureMyDNSCalls(t)
-	sent := captureMailCalls(t)
-
-	// First run: IP changed (0.0.0.0 → 1.2.3.4) → EMAIL_CHK_DDNS=false → no mail.
-	if err := Update(cfg); err != nil {
-		t.Fatalf("first run: %v", err)
-	}
-	if len(*sent) != 0 {
-		t.Errorf("no mail expected on IP-change run when EMAIL_CHK_DDNS=false, got %d", len(*sent))
-	}
-
-	// Simulate UPDATE_TIME elapsed (keepalive).
-	_ = os.Remove(cfg.StateDir + "/gate_update")
-
-	// Second run: same IP, UPDATE_TIME elapsed → forceSync → EMAIL_UP_DDNS=true → mail expected.
-	if err := Update(cfg); err != nil {
-		t.Fatalf("keepalive run: %v", err)
-	}
-	if len(*sent) == 0 {
-		t.Error("expected mail on keepalive run when EMAIL_UP_DDNS=true")
-	} else {
-		mail := (*sent)[0]
-		if !strings.Contains(mail, "DDNS keepalive") {
-			t.Errorf("mail body should contain reason 'DDNS keepalive', got: %s", mail)
-		}
 	}
 }
 
