@@ -4,11 +4,11 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=oneshot
+Type=simple
 WorkingDirectory=/etc/dipper_ai
-ExecStart=/usr/bin/dipper_ai update
-ExecStartPost=/usr/bin/dipper_ai check
-ExecStartPost=/usr/bin/dipper_ai err_mail
+ExecStart=/usr/bin/dipper_ai daemon
+Restart=on-failure
+RestartSec=30s
 
 [Install]
 WantedBy=multi-user.target

@@ -12,8 +12,10 @@ import (
 const usage = `Usage: dipper_ai <command>
 
 Commands:
-  update    Fetch IP, update DDNS if changed
-  check     Check current IP and DDNS status
+  daemon    Run as a long-lived daemon (normal operation, managed by systemd)
+  update    Fetch IP, update DDNS if changed  (manual / one-shot)
+  check     Check current IP and DDNS status  (manual / one-shot)
+  keepalive Force-update all DDNS providers   (manual / one-shot)
   err_mail  Aggregate errors and send notification if threshold met
 `
 
@@ -40,10 +42,14 @@ func main() {
 
 	var runErr error
 	switch cmd {
+	case "daemon":
+		runErr = mode.Daemon(cfg)
 	case "update":
 		runErr = mode.Update(cfg)
 	case "check":
 		runErr = mode.Check(cfg)
+	case "keepalive":
+		runErr = mode.Keepalive(cfg)
 	case "err_mail":
 		runErr = mode.ErrMail(cfg)
 	default:
