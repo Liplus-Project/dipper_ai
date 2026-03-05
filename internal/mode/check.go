@@ -117,19 +117,38 @@ func Check(cfg *config.Config) error {
 		return nil
 	}
 
-	// Mismatch detected: reset IP cache so Update() sees a change and pushes
-	// the correct IP to all DDNS providers immediately.
+	// Mismatch detected: reset per-domain caches for mismatched entries so
+	// the next Update() call sees a cache miss and re-sends to those providers.
+	// Also delete gate_ddns so DDNS_TIME rate-limit does not delay the fix.
 	fmt.Fprintln(os.Stderr, "dipper_ai check: mismatch detected — forcing DDNS update")
 	st, err := state.New(cfg.StateDir)
 	if err != nil {
 		return err
 	}
-	if wantV4 && fetched.IPv4 != "" {
-		_ = st.WriteIP("ipv4", "0.0.0.0")
+	for i, m := range cfg.MyDNS {
+		entryKey := fmt.Sprintf("mydns_%d", i)
+		if wantV4 && m.IPv4 && fetched.IPv4 != "" {
+			_ = st.ResetDomainCache(entryKey, "ipv4")
+		}
+		if wantV6 && m.IPv6 && fetched.IPv6 != "" {
+			_ = st.ResetDomainCache(entryKey, "ipv6")
+		}
 	}
-	if wantV6 && fetched.IPv6 != "" {
-		_ = st.WriteIP("ipv6", "::")
+	for i, cf := range cfg.Cloudflare {
+		if !cf.Enabled {
+			continue
+		}
+		entryKey := fmt.Sprintf("cf_%d", i)
+		if wantV4 && cf.IPv4 && fetched.IPv4 != "" {
+			_ = st.ResetDomainCache(entryKey, "A")
+		}
+		if wantV6 && cf.IPv6 && fetched.IPv6 != "" {
+			_ = st.ResetDomainCache(entryKey, "AAAA")
+		}
 	}
+
+	// Remove DDNS_TIME gate so Update() is not rate-limited on this forced run.
+	_ = os.Remove(cfg.StateDir + "/gate_ddns")
 
 	updateErr := Update(cfg)
 	_ = checkGate.Touch()

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/Liplus-Project/dipper_ai/internal/config"
 	"github.com/Liplus-Project/dipper_ai/internal/ddns"
@@ -203,50 +204,62 @@ func TestCheck_Gate_SkipsWhenRecent(t *testing.T) {
 	}
 }
 
-// TestUpdate_DDNSGate_BypassedOnIPChange verifies that a real IP change
-// bypasses the DDNS_TIME gate even when the gate is still active.
-func TestUpdate_DDNSGate_BypassedOnIPChange(t *testing.T) {
+// TestUpdate_PerDomain_OnlyChangedEntry verifies that only the entry whose
+// per-domain cache differs from the current IP is updated; unchanged entries
+// are skipped even when the timer fires.
+func TestUpdate_PerDomain_OnlyChangedEntry(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &config.Config{
 		StateDir:     dir,
 		IPv4:         true,
 		IPv4DDNS:     true,
 		UpdateTime:   1440,
-		DDNSTime:     1440, // very long — gate stays active
 		MyDNSIPv4URL: "http://fake.invalid/login.html",
 		MyDNS: []config.MyDNSEntry{
-			{ID: "u", Pass: "p", Domain: "home.example.com", IPv4: true},
+			{ID: "u0", Pass: "p0", Domain: "entry0.example.com", IPv4: true},
+			{ID: "u1", Pass: "p1", Domain: "entry1.example.com", IPv4: true},
 		},
 	}
 
-	// Pre-cache an old IP so the first update() run touches the ddnsGate.
+	// Pre-seed entry0 cache with current IP (already up-to-date).
+	// entry1 cache is empty (0.0.0.0) → needs update.
 	st, _ := state.New(dir)
-	_ = st.WriteIP("ipv4", "1.1.1.1")
+	_ = st.WriteDomainCache("mydns_0", "ipv4", "1.2.3.4")
+	// mydns_1 left at default (0.0.0.0)
+
+	// Pre-touch gate_update so forceSync does not fire on this run.
+	gateFile := dir + "/gate_update"
+	_ = os.WriteFile(gateFile, []byte(time.Now().Format(time.RFC3339)), 0644)
 
 	origFetch := ipFetch
-	ipFetch = fakeFetchIP("1.1.1.1") // no change yet
+	ipFetch = fakeFetchIP("1.2.3.4")
 	t.Cleanup(func() { ipFetch = origFetch })
 
+	updated := &[]string{}
 	origMyDNS := mydnsUpdateIPv4
-	callCount := 0
 	mydnsUpdateIPv4 = func(e ddns.MyDNSEntry, u string) ddns.ProviderResult {
-		callCount++
+		*updated = append(*updated, e.Domain)
 		return ddns.ProviderResult{}
 	}
 	t.Cleanup(func() { mydnsUpdateIPv4 = origMyDNS })
 
-	// First update: IP unchanged → gate should block (DDNSTime=1440 → gate active after touch)
-	// Actually on first run gate_ddns doesn't exist yet → ShouldRun=true → update fires
-	_ = Update(cfg)
-	after1 := callCount
+	if err := Update(cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-	// Now simulate IP change — gate_ddns is now active (just touched).
-	ipFetch = fakeFetchIP("9.9.9.9") // new IP
-
-	_ = Update(cfg)
-	after2 := callCount
-
-	if after2 <= after1 {
-		t.Errorf("IP change should bypass DDNS gate; callCount before=%d after=%d", after1, after2)
+	// Only entry1 should have been updated.
+	for _, d := range *updated {
+		if d == "entry0.example.com" {
+			t.Error("entry0 should NOT be updated (cache already matches)")
+		}
+	}
+	found1 := false
+	for _, d := range *updated {
+		if d == "entry1.example.com" {
+			found1 = true
+		}
+	}
+	if !found1 {
+		t.Error("entry1 should have been updated (cache was 0.0.0.0)")
 	}
 }

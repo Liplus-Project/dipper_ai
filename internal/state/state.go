@@ -44,6 +44,39 @@ func (m *Manager) WriteIP(key, ip string) error {
 	return os.WriteFile(m.path("ip_"+key), []byte(ip+"\n"), 0644)
 }
 
+// ReadDomainCache returns the last IP sent to a specific provider domain.
+// entryKey examples: "mydns_0", "cf_0".
+// family: "ipv4" or "ipv6" (or record type "A" / "AAAA" for Cloudflare).
+// Returns "0.0.0.0" / "::" when not yet sent so the first run always updates.
+func (m *Manager) ReadDomainCache(entryKey, family string) (string, error) {
+	data, err := os.ReadFile(m.path("cache_" + entryKey + "_" + family))
+	if os.IsNotExist(err) {
+		if family == "ipv6" || family == "AAAA" {
+			return "::", nil
+		}
+		return "0.0.0.0", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// WriteDomainCache persists the last-sent IP for a specific provider domain.
+func (m *Manager) WriteDomainCache(entryKey, family, ip string) error {
+	return os.WriteFile(m.path("cache_"+entryKey+"_"+family), []byte(ip+"\n"), 0644)
+}
+
+// ResetDomainCache resets a domain's cache to the zero value, so the next
+// update run treats it as an IP change and re-sends to that provider.
+func (m *Manager) ResetDomainCache(entryKey, family string) error {
+	zero := "0.0.0.0"
+	if family == "ipv6" || family == "AAAA" {
+		zero = "::"
+	}
+	return m.WriteDomainCache(entryKey, family, zero)
+}
+
 // ReadDDNSResult returns the last DDNS result for the given provider+domain key.
 func (m *Manager) ReadDDNSResult(key string) (string, error) {
 	data, err := os.ReadFile(m.path("ddns_" + key))
