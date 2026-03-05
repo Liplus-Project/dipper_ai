@@ -155,8 +155,11 @@ func parseDurationMinutes(s string) (int, error) {
 	switch last {
 	case 's', 'm', 'h', 'd':
 		n, err := strconv.Atoi(s[:len(s)-1])
-		if err != nil || n < 0 {
+		if err != nil {
 			return 0, fmt.Errorf("invalid duration %q", s)
+		}
+		if n < 0 {
+			return -1, nil // negative → sentinel; caller clamps to minimum
 		}
 		switch last {
 		case 's':
@@ -179,8 +182,11 @@ func parseDurationMinutes(s string) (int, error) {
 	}
 	// No suffix — treat as plain integer (minutes).
 	n, err := strconv.Atoi(s)
-	if err != nil || n < 0 {
+	if err != nil {
 		return 0, fmt.Errorf("invalid duration %q", s)
+	}
+	if n < 0 {
+		return -1, nil // negative → sentinel; caller clamps to minimum
 	}
 	return n, nil
 }
