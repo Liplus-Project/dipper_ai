@@ -73,13 +73,6 @@ func Update(cfg *config.Config) error {
 		return fetched.ErrIPv6
 	}
 
-	if fetched.IPv4 != "" {
-		fmt.Fprintf(os.Stderr, "dipper_ai update: IPv4=%s\n", fetched.IPv4)
-	}
-	if fetched.IPv6 != "" {
-		fmt.Fprintf(os.Stderr, "dipper_ai update: IPv6=%s\n", fetched.IPv6)
-	}
-
 	// --- UPDATE_TIME gate: MyDNS keepalive ---
 	// When elapsed, all MyDNS entries are force-updated regardless of IP change.
 	// Cloudflare is excluded — its records persist without periodic refresh.
@@ -115,8 +108,7 @@ func Update(cfg *config.Config) error {
 				} else {
 					_ = st.WriteDomainCache(entryKey, "ipv4", fetched.IPv4)
 					_ = st.WriteDDNSResult(entryKey+"_ipv4", "ok")
-					fmt.Fprintf(os.Stderr, "dipper_ai update: mydns[%d] %s ipv4: ok\n", i, entry.Domain)
-					successLines = append(successLines, fmt.Sprintf("  mydns[%d] %s ipv4: ok", i, entry.Domain))
+					successLines = append(successLines, fmt.Sprintf(" mydns[%d] %s ipv4: ok", i, entry.Domain))
 					anyUpdate = true
 					if ipDiffers {
 						anyIPChange = true
@@ -140,8 +132,7 @@ func Update(cfg *config.Config) error {
 				} else {
 					_ = st.WriteDomainCache(entryKey, "ipv6", fetched.IPv6)
 					_ = st.WriteDDNSResult(entryKey+"_ipv6", "ok")
-					fmt.Fprintf(os.Stderr, "dipper_ai update: mydns[%d] %s ipv6: ok\n", i, entry.Domain)
-					successLines = append(successLines, fmt.Sprintf("  mydns[%d] %s ipv6: ok", i, entry.Domain))
+					successLines = append(successLines, fmt.Sprintf(" mydns[%d] %s ipv6: ok", i, entry.Domain))
 					anyUpdate = true
 					if ipDiffers {
 						anyIPChange = true
@@ -178,8 +169,7 @@ func Update(cfg *config.Config) error {
 				} else {
 					_ = st.WriteDomainCache(entryKey, "A", fetched.IPv4)
 					_ = st.WriteDDNSResult(entryKey+"_A", "ok")
-					fmt.Fprintf(os.Stderr, "dipper_ai update: cf[%d] %s A: ok\n", i, cf.Domain)
-					successLines = append(successLines, fmt.Sprintf("  cf[%d] %s A: ok", i, cf.Domain))
+					successLines = append(successLines, fmt.Sprintf(" cf[%d] %s A: ok", i, cf.Domain))
 					anyUpdate = true
 					anyIPChange = true
 				}
@@ -198,8 +188,7 @@ func Update(cfg *config.Config) error {
 				} else {
 					_ = st.WriteDomainCache(entryKey, "AAAA", fetched.IPv6)
 					_ = st.WriteDDNSResult(entryKey+"_AAAA", "ok")
-					fmt.Fprintf(os.Stderr, "dipper_ai update: cf[%d] %s AAAA: ok\n", i, cf.Domain)
-					successLines = append(successLines, fmt.Sprintf("  cf[%d] %s AAAA: ok", i, cf.Domain))
+					successLines = append(successLines, fmt.Sprintf(" cf[%d] %s AAAA: ok", i, cf.Domain))
 					anyUpdate = true
 					anyIPChange = true
 				}
@@ -207,8 +196,18 @@ func Update(cfg *config.Config) error {
 		}
 	}
 
-	if !anyUpdate {
-		fmt.Fprintln(os.Stderr, "dipper_ai update: all domains up to date, skipping DDNS")
+	// Log only when at least one update was attempted.
+	// Silent output when nothing changed keeps the systemd journal clean.
+	if anyUpdate {
+		if fetched.IPv4 != "" {
+			fmt.Fprintf(os.Stderr, "dipper_ai update: IPv4=%s\n", fetched.IPv4)
+		}
+		if fetched.IPv6 != "" {
+			fmt.Fprintf(os.Stderr, "dipper_ai update: IPv6=%s\n", fetched.IPv6)
+		}
+		for _, line := range successLines {
+			fmt.Fprintf(os.Stderr, "dipper_ai update:%s\n", line)
+		}
 	}
 
 	// Touch gates after processing.
