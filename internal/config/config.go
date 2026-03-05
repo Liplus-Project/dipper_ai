@@ -28,7 +28,7 @@ type Config struct {
 
 	// Time gates (minutes)
 	// UpdateTime:  minimum 3
-	// DDNSTime:    minimum 1
+	// DDNSTime:    0 = keepalive disabled (IP-change only); else minimum 1
 	// IPCacheTime: 0 = disabled, else minimum 15
 	// ErrChkTime:  0 = disabled, else minimum 1
 	UpdateTime  int
@@ -203,7 +203,7 @@ func buildConfig(kv map[string]string) (*Config, error) {
 
 	// --- Time gates ---
 	c.UpdateTime = intMin("UPDATE_TIME", 1440, 3)
-	c.DDNSTime = intMin("DDNS_TIME", 1, 1)
+	c.DDNSTime = intGate("DDNS_TIME", 0, 1) // 0 = keepalive disabled (default); N = keepalive every N minutes
 	c.IPCacheTime = intGate("IP_CACHE_TIME", 0, 15)
 	c.ErrChkTime = intGate("ERR_CHK_TIME", 0, 1)
 

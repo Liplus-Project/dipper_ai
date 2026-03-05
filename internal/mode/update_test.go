@@ -66,6 +66,7 @@ func captureMyDNSCalls(t *testing.T) *[]string {
 }
 
 // baseCfg builds a minimal Config for update tests.
+// DDNSTime defaults to 0 (keepalive disabled) — IP-change only.
 func baseCfg(t *testing.T) *config.Config {
 	t.Helper()
 	return &config.Config{
@@ -73,7 +74,7 @@ func baseCfg(t *testing.T) *config.Config {
 		IPv4:       true,
 		IPv4DDNS:   true,
 		UpdateTime: 1,
-		DDNSTime:   1,
+		DDNSTime:   0, // keepalive disabled by default
 	}
 }
 
@@ -181,6 +182,7 @@ func TestUpdate_IPv6FetchFail_IPv4Proceeds(t *testing.T) {
 // restores externally reset DDNS records.
 func TestUpdate_Keepalive(t *testing.T) {
 	cfg := baseCfg(t)
+	cfg.DDNSTime = 1 // enable keepalive for this test
 	cfg.MyDNS = []config.MyDNSEntry{{ID: "id0", Pass: "pass0", Domain: "home.example.com", IPv4: true}}
 
 	overrideFetch(t, fakeFetch("1.2.3.4", ""))
@@ -322,6 +324,7 @@ func TestUpdate_Mail_IPChanged(t *testing.T) {
 // keepalive updates (IP unchanged, DDNS_TIME elapsed), not on IP-change runs.
 func TestUpdate_Mail_Keepalive(t *testing.T) {
 	cfg := baseCfg(t)
+	cfg.DDNSTime = 1 // enable keepalive so the second run triggers it
 	cfg.EmailAddr = "test@example.com"
 	cfg.EmailUpDDNS = true // notify on keepalive only
 	cfg.EmailChkDDNS = false
