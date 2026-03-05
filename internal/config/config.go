@@ -137,6 +137,54 @@ func ParseFile(path string) (*Config, error) {
 	return buildConfig(kv)
 }
 
+// parseDurationMinutes parses a duration string and returns the value in minutes.
+//
+// Accepted formats:
+//
+//	"30s"  → 1  (seconds, rounded up to 1 minute minimum)
+//	"5m"   → 5  (minutes)
+//	"2h"   → 120
+//	"1d"   → 1440
+//	"5"    → 5  (plain integer treated as minutes — backward compatible)
+//	"0"    → 0  (zero is preserved; callers decide whether 0 means disabled)
+func parseDurationMinutes(s string) (int, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty duration")
+	}
+	last := s[len(s)-1]
+	switch last {
+	case 's', 'm', 'h', 'd':
+		n, err := strconv.Atoi(s[:len(s)-1])
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("invalid duration %q", s)
+		}
+		switch last {
+		case 's':
+			// Convert seconds to minutes, minimum 1 when non-zero.
+			if n == 0 {
+				return 0, nil
+			}
+			m := n / 60
+			if n%60 > 0 {
+				m++
+			}
+			return m, nil
+		case 'm':
+			return n, nil
+		case 'h':
+			return n * 60, nil
+		case 'd':
+			return n * 1440, nil
+		}
+	}
+	// No suffix — treat as plain integer (minutes).
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("invalid duration %q", s)
+	}
+	return n, nil
+}
+
 // buildConfig constructs and validates a Config from raw key-value pairs.
 func buildConfig(kv map[string]string) (*Config, error) {
 	c := &Config{}
@@ -162,9 +210,9 @@ func buildConfig(kv map[string]string) (*Config, error) {
 		if !ok {
 			return def
 		}
-		n, err := strconv.Atoi(v)
+		n, err := parseDurationMinutes(v)
 		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: invalid integer %q", key, v))
+			errs = append(errs, fmt.Sprintf("%s: invalid duration %q", key, v))
 			return def
 		}
 		if n < min {
@@ -178,9 +226,9 @@ func buildConfig(kv map[string]string) (*Config, error) {
 		if !ok {
 			return def
 		}
-		n, err := strconv.Atoi(v)
+		n, err := parseDurationMinutes(v)
 		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: invalid integer %q", key, v))
+			errs = append(errs, fmt.Sprintf("%s: invalid duration %q", key, v))
 			return def
 		}
 		if n == 0 {

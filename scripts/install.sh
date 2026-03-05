@@ -35,15 +35,31 @@ if [[ ! -f "$CONF_DIR/user.conf" ]]; then
 fi
 
 # --- Determine DDNS_TIME for systemd timer interval ---
-# Read DDNS_TIME (integer minutes) from user.conf.
+# Read DDNS_TIME from user.conf and convert to minutes.
+# Supported formats: 5m, 2h, 1d, 30s, or plain integer (minutes).
 # Priority: /etc/dipper_ai/user.conf > ./user.conf > default (5 min).
 # DDNS_TIME=0 means "no rate-limit gate" — fall back to 5-minute default.
+
+parse_duration_min() {
+  local v="$1"
+  if   [[ "$v" =~ ^([0-9]+)d$ ]]; then echo $(( ${BASH_REMATCH[1]} * 1440 ))
+  elif [[ "$v" =~ ^([0-9]+)h$ ]]; then echo $(( ${BASH_REMATCH[1]} * 60 ))
+  elif [[ "$v" =~ ^([0-9]+)m$ ]]; then echo "${BASH_REMATCH[1]}"
+  elif [[ "$v" =~ ^([0-9]+)s$ ]]; then
+    local sec="${BASH_REMATCH[1]}"
+    echo $(( (sec + 59) / 60 ))   # round up to nearest minute
+  elif [[ "$v" =~ ^[0-9]+$ ]];    then echo "$v"  # plain integer = minutes
+  else echo "5"                                    # unrecognised → default
+  fi
+}
+
 DDNS_TIME_MIN=5
 for conf_candidate in "$CONF_DIR/user.conf" "./user.conf"; do
   if [[ -f "$conf_candidate" ]]; then
     v=$(grep -E '^DDNS_TIME=' "$conf_candidate" 2>/dev/null | tail -1 | cut -d= -f2 | sed 's/[[:space:]#].*//')
-    if [[ "$v" =~ ^[1-9][0-9]*$ ]]; then
-      DDNS_TIME_MIN="$v"
+    parsed=$(parse_duration_min "$v")
+    if [[ "$parsed" =~ ^[1-9][0-9]*$ ]]; then
+      DDNS_TIME_MIN="$parsed"
     fi
     break
   fi

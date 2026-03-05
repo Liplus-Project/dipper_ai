@@ -292,3 +292,64 @@ func TestStateDir(t *testing.T) {
 		t.Errorf("StateDir: got %q", cfg.StateDir)
 	}
 }
+
+func TestParseDurationMinutes(t *testing.T) {
+	cases := []struct {
+		input   string
+		want    int
+		wantErr bool
+	}{
+		{"1d", 1440, false},
+		{"2d", 2880, false},
+		{"1h", 60, false},
+		{"2h", 120, false},
+		{"5m", 5, false},
+		{"1m", 1, false},
+		{"60s", 1, false},
+		{"90s", 2, false},  // rounds up
+		{"30s", 1, false},  // rounds up
+		{"0s", 0, false},
+		{"5", 5, false},    // plain integer = minutes
+		{"0", 0, false},
+		{"1440", 1440, false},
+		{"", 0, true},
+		{"abc", 0, true},
+		{"5x", 0, true},
+	}
+	for _, tc := range cases {
+		got, err := parseDurationMinutes(tc.input)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("parseDurationMinutes(%q): expected error, got %d", tc.input, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("parseDurationMinutes(%q): unexpected error: %v", tc.input, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("parseDurationMinutes(%q): got %d, want %d", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestSuffixDurationInConfig(t *testing.T) {
+	path := writeConf(t, "UPDATE_TIME=1d\nDDNS_TIME=5m\nIP_CACHE_TIME=1h\nERR_CHK_TIME=2m\n")
+	cfg, err := ParseFile(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.UpdateTime != 1440 {
+		t.Errorf("UPDATE_TIME=1d: got %d, want 1440", cfg.UpdateTime)
+	}
+	if cfg.DDNSTime != 5 {
+		t.Errorf("DDNS_TIME=5m: got %d, want 5", cfg.DDNSTime)
+	}
+	if cfg.IPCacheTime != 60 {
+		t.Errorf("IP_CACHE_TIME=1h: got %d, want 60", cfg.IPCacheTime)
+	}
+	if cfg.ErrChkTime != 2 {
+		t.Errorf("ERR_CHK_TIME=2m: got %d, want 2", cfg.ErrChkTime)
+	}
+}

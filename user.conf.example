@@ -23,14 +23,17 @@ IPV4_DDNS=on            # Update DDNS with IPv4 / A record (default: on)
 IPV6_DDNS=on            # Update DDNS with IPv6 / AAAA record (default: on)
 
 # ---------------------------------------------------------------------------
-# Time gates  (minutes)
-#   UPDATE_TIME   min 3    — how often the periodic update runs
-#   DDNS_TIME     min 1    — how often DDNS is updated when IP changes
-#   IP_CACHE_TIME 0=off    — how long the IP cache is valid (min 15 when on)
-#   ERR_CHK_TIME  0=off    — how often err_mail mode runs  (min  1 when on)
+# Time gates
+#   Suffix format: s=seconds  m=minutes  h=hours  d=days
+#   Plain integer is treated as minutes (backward compatible).
+#
+#   UPDATE_TIME   min 3m   — periodic MyDNS keepalive interval
+#   DDNS_TIME     min 1m   — IP-change check interval (also sets systemd timer)
+#   IP_CACHE_TIME 0=off    — IP cache refresh interval (min 15m when on)
+#   ERR_CHK_TIME  0=off    — error-mail check interval (min  1m when on)
 # ---------------------------------------------------------------------------
-UPDATE_TIME=1440        # 1 day
-DDNS_TIME=1             # 1 minute
+UPDATE_TIME=1d          # 1 day
+DDNS_TIME=5m            # 5 minutes
 IP_CACHE_TIME=0         # disabled
 ERR_CHK_TIME=0          # disabled
 
