@@ -71,8 +71,6 @@ func Check(cfg *config.Config) error {
 				fmt.Fprintf(os.Stderr, "dipper_ai check: %s A=%s want=%s → mismatch\n", m.Domain, registered, fetched.IPv4)
 				mydnsMismatch[i].ipv4 = true
 				mismatch = true
-			} else {
-				fmt.Fprintf(os.Stderr, "dipper_ai check: %s A=%s ok\n", m.Domain, registered)
 			}
 		}
 		if wantV6 && m.IPv6 && fetched.IPv6 != "" {
@@ -85,8 +83,6 @@ func Check(cfg *config.Config) error {
 				fmt.Fprintf(os.Stderr, "dipper_ai check: %s AAAA=%s want=%s → mismatch\n", m.Domain, registered, fetched.IPv6)
 				mydnsMismatch[i].ipv6 = true
 				mismatch = true
-			} else {
-				fmt.Fprintf(os.Stderr, "dipper_ai check: %s AAAA=%s ok\n", m.Domain, registered)
 			}
 		}
 	}
@@ -106,8 +102,6 @@ func Check(cfg *config.Config) error {
 				fmt.Fprintf(os.Stderr, "dipper_ai check: %s A=%s want=%s → mismatch\n", cf.Domain, registered, fetched.IPv4)
 				cfMismatch[i].ipv4 = true
 				mismatch = true
-			} else {
-				fmt.Fprintf(os.Stderr, "dipper_ai check: %s A=%s ok\n", cf.Domain, registered)
 			}
 		}
 		if wantV6 && cf.IPv6 && fetched.IPv6 != "" {
@@ -120,14 +114,12 @@ func Check(cfg *config.Config) error {
 				fmt.Fprintf(os.Stderr, "dipper_ai check: %s AAAA=%s want=%s → mismatch\n", cf.Domain, registered, fetched.IPv6)
 				cfMismatch[i].ipv6 = true
 				mismatch = true
-			} else {
-				fmt.Fprintf(os.Stderr, "dipper_ai check: %s AAAA=%s ok\n", cf.Domain, registered)
 			}
 		}
 	}
 
 	if !mismatch {
-		fmt.Fprintln(os.Stderr, "dipper_ai check: all domains match current IP")
+		// All domains are correct — silent exit keeps the systemd journal clean.
 		return nil
 	}
 
