@@ -5,6 +5,7 @@ package ip
 import (
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -20,6 +21,9 @@ type Result struct {
 }
 
 // Fetch retrieves the current public IPs according to the flags.
+// When DIPPER_AI_FAKE_IP_V4 / DIPPER_AI_FAKE_IP_V6 are set (test-only), the
+// corresponding address is returned directly without calling dig.
+// These variables must never be set in production.
 // fetchV4 / fetchV6 enable/disable each address family independently.
 // A failure in one family is stored in Result.ErrIPv4 / Result.ErrIPv6 and
 // does NOT prevent the other family from being fetched.  The returned error
@@ -28,20 +32,28 @@ func Fetch(fetchV4, fetchV6 bool) (*Result, error) {
 	r := &Result{}
 
 	if fetchV4 {
-		ipv4, err := fetchIPv4()
-		if err != nil {
-			r.ErrIPv4 = fmt.Errorf("IPv4 fetch failed: %w", err)
+		if fake := os.Getenv("DIPPER_AI_FAKE_IP_V4"); fake != "" {
+			r.IPv4 = fake
 		} else {
-			r.IPv4 = ipv4
+			ipv4, err := fetchIPv4()
+			if err != nil {
+				r.ErrIPv4 = fmt.Errorf("IPv4 fetch failed: %w", err)
+			} else {
+				r.IPv4 = ipv4
+			}
 		}
 	}
 
 	if fetchV6 {
-		ipv6, err := fetchIPv6()
-		if err != nil {
-			r.ErrIPv6 = fmt.Errorf("IPv6 fetch failed: %w", err)
+		if fake := os.Getenv("DIPPER_AI_FAKE_IP_V6"); fake != "" {
+			r.IPv6 = fake
 		} else {
-			r.IPv6 = ipv6
+			ipv6, err := fetchIPv6()
+			if err != nil {
+				r.ErrIPv6 = fmt.Errorf("IPv6 fetch failed: %w", err)
+			} else {
+				r.IPv6 = ipv6
+			}
 		}
 	}
 
