@@ -4,16 +4,36 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
 	"github.com/Liplus-Project/dipper_ai/internal/config"
 	"github.com/Liplus-Project/dipper_ai/internal/state"
 )
 
-// Package-level DNS lookup functions — overridable in tests.
+// Package-level DNS lookup functions — overridable in unit tests.
+// Acceptance tests use DIPPER_AI_FAKE_DNS instead.
 var (
 	dnsLookupA    = lookupARecord
 	dnsLookupAAAA = lookupAAAARecord
 )
+
+// fakeDNSMap parses DIPPER_AI_FAKE_DNS into a domain→ip map (test-only).
+// Format: "domain1=ip1,domain2=ip2"
+// Returns nil when the env var is not set.
+func fakeDNSMap() map[string]string {
+	v := os.Getenv("DIPPER_AI_FAKE_DNS")
+	if v == "" {
+		return nil
+	}
+	m := map[string]string{}
+	for _, pair := range strings.Split(v, ",") {
+		kv := strings.SplitN(strings.TrimSpace(pair), "=", 2)
+		if len(kv) == 2 {
+			m[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
+		}
+	}
+	return m
+}
 
 // domainMismatch records which address families mismatched for a single entry.
 type domainMismatch struct {
@@ -55,6 +75,25 @@ func Check(cfg *config.Config) error {
 	mydnsMismatch := make([]domainMismatch, len(cfg.MyDNS))
 	cfMismatch := make([]domainMismatch, len(cfg.Cloudflare))
 	mismatch := false
+
+	// When DIPPER_AI_FAKE_DNS is set, override DNS lookups with the map.
+	// This is test-only and must never be set in production.
+	if fakeMap := fakeDNSMap(); fakeMap != nil {
+		origA, origAAAA := dnsLookupA, dnsLookupAAAA
+		dnsLookupA = func(domain string) (string, error) {
+			if ip, ok := fakeMap[domain]; ok {
+				return ip, nil
+			}
+			return origA(domain)
+		}
+		dnsLookupAAAA = func(domain string) (string, error) {
+			if ip, ok := fakeMap[domain]; ok {
+				return ip, nil
+			}
+			return origAAAA(domain)
+		}
+		defer func() { dnsLookupA, dnsLookupAAAA = origA, origAAAA }()
+	}
 
 	// --- Verify MyDNS domains ---
 	for i, m := range cfg.MyDNS {
