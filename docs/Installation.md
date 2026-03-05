@@ -80,6 +80,29 @@ sudo dipper_ai update
 
 ---
 
+## アップデート
+
+新しいバージョンが出たときはリポジトリのディレクトリで以下を実行するだけです。
+
+```bash
+cd dipper_ai
+git pull
+go build -o dipper_ai ./cmd/dipper_ai
+sudo bash scripts/install.sh
+```
+
+4 ステップの意味:
+
+| ステップ | 内容 |
+|----------|------|
+| `git pull` | 最新のソースコードを取得 |
+| `go build ...` | バイナリを再ビルド |
+| `sudo bash scripts/install.sh` | バイナリと systemd unit を上書きインストール・タイマー再起動 |
+
+> **Note:** 設定ファイル (`/etc/dipper_ai/user.conf`) はインストールスクリプトで上書きされません。設定は引き継がれます。
+
+---
+
 ## アンインストール
 
 ```bash
