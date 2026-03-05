@@ -90,12 +90,15 @@ func Update(cfg *config.Config) error {
 	}
 
 	// --- DDNS_TIME gate ---
-	// Controls the periodic keepalive update interval.
-	// When DDNS_TIME has elapsed, DDNS is updated regardless of IP change
-	// to restore any externally reset records.
-	// When IP has changed, the gate is bypassed for an immediate update.
-	ddnsGate := timegate.New(cfg.StateDir, "ddns", time.Duration(cfg.DDNSTime)*time.Minute)
-	ddnsReady := ddnsGate.ShouldRun()
+	// DDNS_TIME=0 (default): keepalive disabled; update only on IP change.
+	// DDNS_TIME>0: periodic keepalive every N minutes regardless of IP change,
+	//              which is required by services like MyDNS that expire records.
+	var ddnsGate *timegate.Gate
+	ddnsReady := false
+	if cfg.DDNSTime > 0 {
+		ddnsGate = timegate.New(cfg.StateDir, "ddns", time.Duration(cfg.DDNSTime)*time.Minute)
+		ddnsReady = ddnsGate.ShouldRun()
+	}
 
 	if !ipChanged && !ddnsReady {
 		fmt.Fprintln(os.Stderr, "dipper_ai update: IP unchanged, skipping DDNS")
@@ -189,7 +192,9 @@ func Update(cfg *config.Config) error {
 		}
 	}
 
-	_ = ddnsGate.Touch()
+	if ddnsGate != nil {
+		_ = ddnsGate.Touch()
+	}
 
 	// --- Email notification ---
 	// Send only when the relevant flag is set and at least one provider succeeded.
