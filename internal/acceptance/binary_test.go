@@ -181,12 +181,20 @@ func TestBinary_Check_PartialMismatch_OnlyStaleUpdated(t *testing.T) {
 	stateDir := t.TempDir()
 	conf := writeConf(t, stateDir,
 		"IPV4=on\nIPV4_DDNS=on\n"+
+			// Large UPDATE_TIME prevents forceSync so per-domain cache is the sole trigger.
+			"UPDATE_TIME=1440\n"+
 			// Entry 0: DNS ok (id=ok-id)
 			"MYDNS_0_ID=ok-id\nMYDNS_0_PASS=pass\nMYDNS_0_DOMAIN=ok.example.com\nMYDNS_0_IPV4=on\n"+
 			// Entry 1: DNS stale (id=stale-id)
 			"MYDNS_1_ID=stale-id\nMYDNS_1_PASS=pass\nMYDNS_1_DOMAIN=stale.example.com\nMYDNS_1_IPV4=on\n"+
 			"MYDNS_IPV4_URL="+srv.URL+"\n",
 	)
+
+	// Pre-seed the cache for ok.example.com so Update() sees no IP change for it.
+	// Without this, an empty cache would cause Update() to update all entries on first run.
+	if err := os.WriteFile(filepath.Join(stateDir, "cache_mydns_0_ipv4"), []byte("1.2.3.4\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	_, _, code := runBinaryEnv(t, conf,
 		[]string{
