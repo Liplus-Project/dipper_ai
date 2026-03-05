@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"time"
 
 	"github.com/Liplus-Project/dipper_ai/internal/config"
 	"github.com/Liplus-Project/dipper_ai/internal/state"
-	"github.com/Liplus-Project/dipper_ai/internal/timegate"
 )
 
 // Package-level DNS lookup functions — overridable in tests.
@@ -19,19 +17,15 @@ var (
 
 // Check resolves the DNS-registered IP for each configured DDNS domain and
 // compares it with the current external IP.  If any domain has a stale or
-// wrong registration, Check resets the IP cache and forces an immediate DDNS
-// update via Update().
+// wrong registration, Check resets the per-domain cache and forces an
+// immediate DDNS update via Update().
+//
+// No internal gate: the systemd timer (every 5 min) is the effective rate
+// limit.  Running check on every tick means external DNS changes (e.g. manual
+// record edits) are detected and corrected within one timer interval.
 //
 // Equivalent to `dipper check`.
 func Check(cfg *config.Config) error {
-	// Check runs on its own schedule — use UpdateTime so it does not fire on
-	// every timer tick (which would cause spurious DNS lookups and race
-	// conditions immediately after a fresh update).
-	checkGate := timegate.New(cfg.StateDir, "check", time.Duration(cfg.UpdateTime)*time.Minute)
-	if !checkGate.ShouldRun() {
-		return nil
-	}
-
 	wantV4 := cfg.IPv4 && cfg.IPv4DDNS
 	wantV6 := cfg.IPv6 && cfg.IPv6DDNS
 
@@ -113,7 +107,6 @@ func Check(cfg *config.Config) error {
 
 	if !mismatch {
 		fmt.Fprintln(os.Stderr, "dipper_ai check: all domains match current IP")
-		_ = checkGate.Touch()
 		return nil
 	}
 
@@ -150,9 +143,7 @@ func Check(cfg *config.Config) error {
 	// Remove DDNS_TIME gate so Update() is not rate-limited on this forced run.
 	_ = os.Remove(cfg.StateDir + "/gate_ddns")
 
-	updateErr := Update(cfg)
-	_ = checkGate.Touch()
-	return updateErr
+	return Update(cfg)
 }
 
 // lookupARecord resolves the IPv4 A record for domain.
