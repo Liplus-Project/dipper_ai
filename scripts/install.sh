@@ -34,9 +34,38 @@ if [[ ! -f "$CONF_DIR/user.conf" ]]; then
   fi
 fi
 
-echo "Installing systemd units..."
+# --- Determine DDNS_TIME for systemd timer interval ---
+# Read DDNS_TIME (integer minutes) from user.conf.
+# Priority: /etc/dipper_ai/user.conf > ./user.conf > default (5 min).
+# DDNS_TIME=0 means "no rate-limit gate" — fall back to 5-minute default.
+DDNS_TIME_MIN=5
+for conf_candidate in "$CONF_DIR/user.conf" "./user.conf"; do
+  if [[ -f "$conf_candidate" ]]; then
+    v=$(grep -E '^DDNS_TIME=' "$conf_candidate" 2>/dev/null | tail -1 | cut -d= -f2 | sed 's/[[:space:]#].*//')
+    if [[ "$v" =~ ^[1-9][0-9]*$ ]]; then
+      DDNS_TIME_MIN="$v"
+    fi
+    break
+  fi
+done
+
+echo "Installing systemd units (DDNS_TIME=${DDNS_TIME_MIN}min)..."
 install -m 0644 ./systemd/dipper_ai.service "$SYSTEMD_DIR/"
-install -m 0644 ./systemd/dipper_ai.timer   "$SYSTEMD_DIR/"
+
+# Generate the timer with the interval derived from DDNS_TIME.
+# OnBootSec=2min gives the system a short warm-up period after boot.
+cat > "$SYSTEMD_DIR/dipper_ai.timer" <<EOF
+[Unit]
+Description=dipper_ai DDNS manager timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=${DDNS_TIME_MIN}min
+Unit=dipper_ai.service
+
+[Install]
+WantedBy=timers.target
+EOF
 
 systemctl daemon-reload
 systemctl enable --now dipper_ai.timer

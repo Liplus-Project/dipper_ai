@@ -78,6 +78,19 @@ systemctl status dipper_ai.timer
 sudo dipper_ai update
 ```
 
+> **`DDNS_TIME` と systemd タイマー間隔について**
+>
+> `install.sh` は `user.conf` の `DDNS_TIME`（分）を読み取り、
+> `OnUnitActiveSec` を自動的に設定します。
+> 設定ファイルを編集して `DDNS_TIME` を変更した場合は、
+> タイマーに反映させるために `sudo bash scripts/install.sh` を再実行してください。
+>
+> | `DDNS_TIME` | タイマー間隔 |
+> |-------------|-------------|
+> | `0`（デフォルト・無効） | 5 分（フォールバック） |
+> | `1` | 1 分 |
+> | `5` | 5 分 |
+
 ---
 
 ## アップデート
@@ -97,7 +110,7 @@ sudo bash scripts/install.sh
 |----------|------|
 | `git pull` | 最新のソースコードを取得 |
 | `go build ...` | バイナリを再ビルド |
-| `sudo bash scripts/install.sh` | バイナリと systemd unit を上書きインストール・タイマー再起動 |
+| `sudo bash scripts/install.sh` | バイナリと systemd unit を上書きインストール・`DDNS_TIME` に合わせてタイマー間隔を再設定・タイマー再起動 |
 
 > **Note:** 設定ファイル (`/etc/dipper_ai/user.conf`) はインストールスクリプトで上書きされません。設定は引き継がれます。
 
