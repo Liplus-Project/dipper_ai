@@ -1,5 +1,39 @@
 # Installation
 
+## リリースバイナリを使う（推奨）
+
+v1.6.0 以降、[GitHubリリース](https://github.com/Liplus-Project/dipper_ai/releases/latest) にビルド済みバイナリを添付しています。
+Go環境不要でインストールできます。
+
+```bash
+# 例: Linux AMD64
+curl -LO https://github.com/Liplus-Project/dipper_ai/releases/latest/download/dipper_ai_linux_amd64.tar.gz
+tar -xzf dipper_ai_linux_amd64.tar.gz
+sudo mv dipper_ai /usr/bin/dipper_ai
+```
+
+対応プラットフォーム: `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64`, `windows/arm64`
+
+バイナリを配置したあとはリポジトリをクローンして `scripts/install.sh` を実行してください（systemdの設定が必要なため）。
+
+```bash
+git clone https://github.com/Liplus-Project/dipper_ai.git
+cd dipper_ai
+sudo bash scripts/install.sh
+```
+
+---
+
+## go install を使う
+
+Go環境がある場合:
+
+```bash
+go install github.com/Liplus-Project/dipper_ai/cmd/dipper_ai@latest
+```
+
+---
+
 ## 必要環境
 
 | 項目 | 要件 |
@@ -131,3 +165,22 @@ go test ./...
 ```
 
 全パッケージのユニットテスト・受け入れテストが実行されます（外部 API 接続不要）。
+
+---
+
+## リリース手順（メンテナ向け）
+
+`v` プレフィックスのタグをプッシュすると goreleaser が自動起動し、全プラットフォームのバイナリをビルドしてGitHubリリースに添付します。
+
+```bash
+git tag vX.X.X
+git push origin vX.X.X
+```
+
+バージョニング規則:
+
+| 種別 | 例 | 内容 |
+|------|-----|------|
+| patch | v1.6.1 | バグ修正・設定変更 |
+| minor | v1.7.0 | 新機能・動作変更 |
+| major | v2.0.0 | 破壊的変更 |
