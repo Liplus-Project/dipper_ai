@@ -24,16 +24,38 @@ Configuration format is intentionally independent from dipper (see spec: MAY dif
 
 ## Install / Uninstall
 
-```sh
-# Build
-go build -o dipper_ai ./cmd/dipper_ai
+**リリースバイナリ（Go不要）:**
 
-# Install (as root, AlmaLinux 9/10)
+```sh
+# 例: Linux AMD64
+curl -LO https://github.com/Liplus-Project/dipper_ai/releases/latest/download/dipper_ai_linux_amd64.tar.gz
+tar -xzf dipper_ai_linux_amd64.tar.gz
+sudo mv dipper_ai /usr/bin/dipper_ai
+```
+
+**go install:**
+
+```sh
+go install github.com/Liplus-Project/dipper_ai/cmd/dipper_ai@latest
+```
+
+**ソースからビルド:**
+
+```sh
+go build -o dipper_ai ./cmd/dipper_ai
+```
+
+**systemdセットアップ（AlmaLinux 9/10）:**
+
+```sh
+# Install (as root)
 sudo ./scripts/install.sh
 
 # Uninstall
 sudo ./scripts/uninstall.sh
 ```
+
+詳細は [Installation.md](Installation.md) を参照。
 
 ## Development Status
 
